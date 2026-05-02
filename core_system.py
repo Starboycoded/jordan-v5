@@ -1,46 +1,26 @@
 """
 ╔══════════════════════════════════════════════════════════════════╗
-║         THE TECH SQUAD — JORDAN BOT v4.0 (OPTIMISED)           ║
+║         JORDAN BOT v5.0 — SUPABASE EDITION                      ║
 ║                                                                  ║
-║  FIXES APPLIED:                                                  ║
-║  [1]  Shrunk system prompt  (~800 tokens → ~280 tokens)         ║
-║  [2]  History cut from 20 → 6 turns  (saves ~500 tokens/msg)   ║
-║  [3]  Session persistence in Google Sheets (survives restarts)  ║
-║  [4]  Profile cache per session (no Sheets hit every message)   ║
-║  [5]  Inventory cache reduced to 2 mins for active clients      ║
-║  [6]  Broadcast rate limited (3s gap, max 100/hour)             ║
-║  [7]  /refresh endpoint to clear inventory cache instantly      ║
-║  [8]  /ping endpoint for cron-job.org keep-alive                ║
-║  [9]  Auto AI switching: Groq free → Gemini when needed         ║
-║  [10] Token usage logger per message                            ║
-║  [11] Single gunicorn worker (no race conditions)               ║
-║  [12] Graceful error recovery at every step                     ║
+║  CHANGES FROM v4:                                                ║
+║  [1]  Google Sheets → Supabase (faster, scalable, multi-tenant) ║
+║  [2]  Meta Cloud API replaces Green API                         ║
+║  [3]  Multi-tenant ready (client_id on all tables)              ║
+║  [4]  All session/profile/inventory ops use Supabase REST       ║
 ║                                                                  ║
 ║  RENDER ENV VARS:                                                ║
-║    GREEN_ID           from console.green-api.com                ║
-║    GREEN_TOKEN        from console.green-api.com                ║
-║    GROQ_API_KEY       from console.groq.com       (free)        ║
-║    GEMINI_API_KEY     from aistudio.google.com    (cheap)       ║
-║    ANTHROPIC_API_KEY  from console.anthropic.com  (premium)     ║
-║    AI_ENGINE          groq | gemini | claude  (default: groq)   ║
-║    ADMIN_SECRET       your private dashboard password           ║
-║    BOT_PHONE          your WhatsApp number e.g. 2347025...      ║
-║    CATALOG_URL        https://your-app.onrender.com/shop/...    ║
-║                                                                  ║
-║  GOOGLE SHEETS (name the workbook "TechSquad"):                 ║
-║    Sheet1      Product, Price, Description, Stock,              ║
-║                Tags, Raw_Image_URL                              ║
-║    Customers   Phone, Name, Address, Date                       ║
-║    Sales       OrderID, Phone, Name, Items,                     ║
-║                Address, Status, Date                            ║
-║    Sessions    Phone, Stage, Name, Address,                     ║
-║                Cart, LastUpdated                                ║
-║                                                                  ║
-║  AFTER DEPLOY — DO THIS:                                         ║
-║    1. Go to cron-job.org (free)                                  ║
-║    2. Create cron job → URL: https://your-app.onrender.com/ping ║
-║    3. Schedule: every 10 minutes                                 ║
-║    4. This keeps Render free tier awake 24/7                    ║
+║    SUPABASE_URL        from supabase.com project settings       ║
+║    SUPABASE_KEY        service_role key from supabase.com       ║
+║    WHATSAPP_TOKEN      Meta permanent system user token         ║
+║    PHONE_NUMBER_ID     Meta phone number ID                     ║
+║    GROQ_API_KEY        from console.groq.com (free)             ║
+║    GEMINI_API_KEY      from aistudio.google.com (cheap)         ║
+║    ANTHROPIC_API_KEY   from console.anthropic.com (premium)     ║
+║    AI_ENGINE           groq | gemini | claude (default: groq)   ║
+║    ADMIN_SECRET        your private dashboard password          ║
+║    BOT_PHONE           your WhatsApp number e.g. 2347025...     ║
+║    CATALOG_URL         https://your-app.onrender.com/shop/...   ║
+║    CLIENT_ID           UUID of this business in clients table   ║
 ╚══════════════════════════════════════════════════════════════════╝
 """
 
@@ -54,48 +34,46 @@ import random
 import requests
 from urllib.parse import quote
 from flask import Flask, request, jsonify
-# Meta Cloud API — no more Green API
-import gspread
-from oauth2client.service_account import ServiceAccountCredentials
+from supabase import create_client
+from dotenv import load_dotenv
+
+load_dotenv()
 
 app = Flask(__name__)
 
 # ══════════════════════════════════════════════════════
 # 1.  CONFIGURATION
 # ══════════════════════════════════════════════════════
-GREEN_ID          = os.environ.get("GREEN_ID")
-GREEN_TOKEN       = os.environ.get("GREEN_TOKEN")
+SUPABASE_URL      = os.environ.get("SUPABASE_URL", "")
+SUPABASE_KEY      = os.environ.get("SUPABASE_KEY", "")
 GROQ_API_KEY      = os.environ.get("GROQ_API_KEY", "")
 GEMINI_API_KEY    = os.environ.get("GEMINI_API_KEY", "")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 ADMIN_SECRET      = os.environ.get("ADMIN_SECRET", "techsquad2025")
 BOT_PHONE         = os.environ.get("BOT_PHONE", "2347025041149")
-CATALOG_URL       = os.environ.get("CATALOG_URL", "https://techsquad-bot-2-0.onrender.com/shop/tech_squad")
+CATALOG_URL       = os.environ.get("CATALOG_URL", "https://bot-test-wddr.onrender.com/shop/tech_squad")
+WHATSAPP_TOKEN    = os.environ.get("WHATSAPP_TOKEN", "")
+PHONE_NUMBER_ID   = os.environ.get("PHONE_NUMBER_ID", "")
+CLIENT_ID         = os.environ.get("CLIENT_ID", "")   # UUID from clients table
 
-# AI_ENGINE: groq (free) | gemini (cheap) | claude (premium)
 AI_ENGINE  = os.environ.get("AI_ENGINE", "groq").lower()
 GROQ_MODEL = "llama-3.3-70b-versatile"
+META_API_URL = f"https://graph.facebook.com/v17.0/{PHONE_NUMBER_ID}/messages"
 
-# FIX: Phone number helpers
+# Supabase client
+supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+# ══════════════════════════════════════════════════════
+# 2.  PHONE HELPERS
+# ══════════════════════════════════════════════════════
 def clean_phone(phone: str) -> str:
-    """Strip @c.us for internal storage and matching."""
     return str(phone).replace("@c.us", "").replace("@g.us", "").replace("@lid", "").strip()
 
-def send_phone(phone: str) -> str:
-    """Add @c.us back for sending via Green API."""
-    phone = clean_phone(phone)
-    if phone and not phone.endswith("@c.us"):
-        phone = phone + "@c.us"
-    return phone
 
-
-# Meta Cloud API credentials
-WHATSAPP_TOKEN    = os.environ.get("WHATSAPP_TOKEN", "")
-PHONE_NUMBER_ID   = os.environ.get("PHONE_NUMBER_ID", "989005180973554")
-META_API_URL      = f"https://graph.facebook.com/v17.0/{PHONE_NUMBER_ID}/messages"
-
+# ══════════════════════════════════════════════════════
+# 3.  WHATSAPP SENDER (Meta Cloud API)
+# ══════════════════════════════════════════════════════
 def send_whatsapp(to: str, message: str):
-    """Send message via Meta Cloud API."""
     phone = clean_phone(to)
     try:
         resp = requests.post(
@@ -120,25 +98,21 @@ def send_whatsapp(to: str, message: str):
         print(f"[Meta API] {e}")
         return None
 
+
 # ══════════════════════════════════════════════════════
-# 2.  IN-MEMORY STORE  +  CACHES
+# 4.  IN-MEMORY STORE + CACHES
 # ══════════════════════════════════════════════════════
-sessions        = {}   # RAM sessions (fast access)
-gc              = None
+sessions        = {}
 inventory_cache = {"data": None, "last_updated": 0}
-profile_cache   = {}   # {phone: {profile_dict, fetched_at}}
-token_log       = {}   # {date: total_tokens}
+profile_cache   = {}
+token_log       = {}
 
-CACHE_TTL         = 120   # inventory refresh every 2 mins
-PROFILE_CACHE_TTL = 300   # profile cache 5 mins
-HISTORY_LIMIT     = 6     # only keep last 6 turns (was 20)
-BROADCAST_DELAY   = 3.0   # seconds between broadcast messages
-BROADCAST_HOURLY  = 100   # max messages per hour in broadcast
+CACHE_TTL         = 120
+PROFILE_CACHE_TTL = 300
+HISTORY_LIMIT     = 6
+BROADCAST_DELAY   = 3.0
+BROADCAST_HOURLY  = 100
 
-MEDIA_TYPES = (
-    "imageMessage", "videoMessage", "audioMessage",
-    "documentMessage", "stickerMessage", "voiceMessage", "pttMessage"
-)
 CHECKOUT_TRIGGERS = [
     "checkout", "done", "that's all", "thats all", "place order",
     "i'm done", "im done", "finish", "complete", "confirm",
@@ -161,160 +135,176 @@ def get_session(uid: str) -> dict:
             "saved_address": "",
             "upsell_done":   False,
             "processing":    False,
-            "profile":       None,   # cached profile
+            "profile":       None,
         }
     return sessions[uid]
 
 
 # ══════════════════════════════════════════════════════
-# 3.  GOOGLE SHEETS
+# 5.  SUPABASE DATABASE FUNCTIONS
 # ══════════════════════════════════════════════════════
-def connect_sheets():
-    global gc
-    if gc is None:
-        try:
-            scope = [
-                "https://spreadsheets.google.com/feeds",
-                "https://www.googleapis.com/auth/drive",
-            ]
-            creds = ServiceAccountCredentials.from_json_keyfile_name("creds.json", scope)
-            gc    = gspread.authorize(creds)
-        except Exception as e:
-            print(f"[Sheets] Connection failed: {e}")
-    return gc
-
-
-def get_inventory(sc):
-    """FIX [5]: Reduced cache TTL to 2 mins so new products appear faster."""
+def get_inventory():
+    """Fetch products from Supabase with 2-min cache."""
     now = time.time()
     if inventory_cache["data"] is None or now - inventory_cache["last_updated"] > CACHE_TTL:
         try:
-            inventory_cache["data"]         = sc.open("TechSquad").sheet1.get_all_records()
+            query = supabase.table("products").select("*").eq("active", True)
+            if CLIENT_ID:
+                query = query.eq("client_id", CLIENT_ID)
+            result = query.execute()
+            # Normalise to same format as old Sheets data
+            normalised = []
+            for p in result.data:
+                normalised.append({
+                    "Product":       p.get("name", ""),
+                    "Price":         p.get("price", 0),
+                    "Description":   p.get("description", ""),
+                    "Stock":         p.get("stock", 0),
+                    "Tags":          p.get("tags", ""),
+                    "Raw_Image_URL": p.get("image_url", ""),
+                })
+            inventory_cache["data"]         = normalised
             inventory_cache["last_updated"] = now
         except Exception as e:
-            print(f"[Sheets] Inventory fetch failed: {e}")
+            print(f"[Supabase] Inventory fetch failed: {e}")
             return inventory_cache["data"] or []
     return inventory_cache["data"]
 
 
-def get_profile(sc, phone: str):
-    """FIX [4]: Cache profile in memory, only hit Sheets every 5 mins."""
-    now     = time.time()
-    cached  = profile_cache.get(phone)
+def get_profile(phone: str):
+    """Fetch customer profile from Supabase with 5-min cache."""
+    now    = time.time()
+    cached = profile_cache.get(phone)
     if cached and now - cached["fetched_at"] < PROFILE_CACHE_TTL:
         return cached["data"]
     try:
-        rows    = sc.open("TechSquad").worksheet("Customers").get_all_records()
-        profile = next((r for r in rows if str(r.get("Phone", "")) == str(phone)), None)
+        query = supabase.table("customers").select("*").eq("phone", phone)
+        if CLIENT_ID:
+            query = query.eq("client_id", CLIENT_ID)
+        result = query.execute()
+        profile = result.data[0] if result.data else None
+        # Normalise keys to match old code
+        if profile:
+            profile = {
+                "Name":    profile.get("name", ""),
+                "Address": profile.get("address", ""),
+                "Phone":   profile.get("phone", ""),
+            }
         profile_cache[phone] = {"data": profile, "fetched_at": now}
         return profile
     except Exception as e:
-        print(f"[Sheets] Profile fetch failed: {e}")
+        print(f"[Supabase] Profile fetch failed: {e}")
         return cached["data"] if cached else None
 
 
-def save_profile(sc, phone: str, name: str, address: str):
+def save_profile(phone: str, name: str, address: str):
+    """Upsert customer profile to Supabase."""
     try:
-        ws   = sc.open("TechSquad").worksheet("Customers")
-        rows = ws.get_all_records()
-        phone = clean_phone(phone)
-        idx  = next(
-            (i + 2 for i, r in enumerate(rows) if clean_phone(str(r.get("Phone", ""))) == phone),
-            None
-        )
-        row = [phone, name, address, time.strftime("%Y-%m-%d")]
-        if idx:
-            ws.update(f"A{idx}:D{idx}", [row])
-        else:
-            ws.append_row(row)
-        # Bust profile cache
+        data = {
+            "phone":   phone,
+            "name":    name,
+            "address": address,
+            "last_order": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        }
+        if CLIENT_ID:
+            data["client_id"] = CLIENT_ID
+        supabase.table("customers").upsert(
+            data, on_conflict="phone,client_id"
+        ).execute()
         profile_cache.pop(phone, None)
     except Exception as e:
-        print(f"[Sheets] Save profile failed: {e}")
+        print(f"[Supabase] Save profile failed: {e}")
 
 
-def log_order(sc, order_id, phone, name, items_text, address):
+def log_order(order_id, phone, name, items_text, address):
+    """Insert order into Supabase orders table."""
     try:
-        sc.open("TechSquad").worksheet("Sales").append_row([
-            order_id, phone, name, items_text,
-            address, "Pending", time.strftime("%Y-%m-%d %H:%M"),
-        ])
+        data = {
+            "id":             order_id,
+            "customer_phone": phone,
+            "items":          items_text,
+            "amount":         0,
+            "status":         "Pending",
+            "created_at":     time.strftime("%Y-%m-%dT%H:%M:%S"),
+        }
+        if CLIENT_ID:
+            data["client_id"] = CLIENT_ID
+        supabase.table("orders").insert(data).execute()
     except Exception as e:
-        print(f"[Sheets] Log order failed: {e}")
+        print(f"[Supabase] Log order failed: {e}")
 
 
-def get_order_history(sc, phone: str):
+def get_order_history(phone: str):
+    """Fetch all orders for a customer."""
     try:
-        rows = sc.open("TechSquad").worksheet("Sales").get_all_records()
-        phone = clean_phone(phone)
-        return [r for r in rows if clean_phone(str(r.get("Phone", ""))) == phone]
+        query = supabase.table("orders").select("*").eq("customer_phone", phone)
+        if CLIENT_ID:
+            query = query.eq("client_id", CLIENT_ID)
+        result = query.order("created_at", desc=False).execute()
+        # Normalise to old format
+        orders = []
+        for o in result.data:
+            orders.append({
+                "OrderID": o.get("id", ""),
+                "Items":   o.get("items", ""),
+                "Status":  o.get("status", ""),
+                "Date":    o.get("created_at", ""),
+            })
+        return orders
     except Exception as e:
-        print(f"[Sheets] Order history failed: {e}")
+        print(f"[Supabase] Order history failed: {e}")
         return []
 
 
-# FIX [3]: Session persistence — save/load checkout state to Sheets
-# so a Render restart doesn't wipe mid-checkout customers
-def save_session_state(sc, phone: str, session: dict):
-    """Save checkout stage + cart to Sheets so restarts don't lose it."""
+def save_session_state(phone: str, session: dict):
+    """Upsert session state to Supabase so Render restarts don't lose mid-checkout."""
     try:
-        try:
-            ws = sc.open("TechSquad").worksheet("Sessions")
-        except Exception:
-            return  # Sessions tab not created yet — skip silently
-        rows = ws.get_all_records()
-        phone = clean_phone(phone)
-        idx  = next(
-            (i + 2 for i, r in enumerate(rows) if clean_phone(str(r.get("Phone", ""))) == phone),
-            None
-        )
         cart_json = json.dumps(session.get("cart", {}))
-        row = [
-            phone,
-            session.get("stage", "browsing"),
-            session.get("name", ""),
-            session.get("address", ""),
-            cart_json,
-            time.strftime("%Y-%m-%d %H:%M"),
-        ]
-        if idx:
-            ws.update(f"A{idx}:F{idx}", [row])
-        else:
-            ws.append_row(row)
+        data = {
+            "phone":      phone,
+            "stage":      session.get("stage", "browsing"),
+            "name":       session.get("name", ""),
+            "address":    session.get("address", ""),
+            "cart":       cart_json,
+            "updated_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        }
+        if CLIENT_ID:
+            data["client_id"] = CLIENT_ID
+        supabase.table("sessions").upsert(
+            data, on_conflict="phone,client_id"
+        ).execute()
     except Exception as e:
         print(f"[Sessions] Save failed: {e}")
 
 
-def load_session_state(sc, phone: str) -> dict | None:
-    """Load saved checkout state from Sheets after a restart."""
+def load_session_state(phone: str) -> dict | None:
+    """Load saved session from Supabase after a restart."""
     try:
-        try:
-            ws = sc.open("TechSquad").worksheet("Sessions")
-        except Exception:
-            return None  # Sessions tab not created yet — skip silently
-        rows = ws.get_all_records()
-        phone = clean_phone(phone)
-        row  = next((r for r in rows if clean_phone(str(r.get("Phone", ""))) == phone), None)
-        if not row:
+        query = supabase.table("sessions").select("*").eq("phone", phone)
+        if CLIENT_ID:
+            query = query.eq("client_id", CLIENT_ID)
+        result = query.execute()
+        if not result.data:
             return None
-        # Only restore if it was updated in the last 30 mins
-        last = row.get("LastUpdated", "")
+        row = result.data[0]
+        # Only restore if updated in last 30 mins
+        last = row.get("updated_at", "")
         if last:
             try:
-                saved_ts = time.mktime(time.strptime(last, "%Y-%m-%d %H:%M"))
-                if time.time() - saved_ts > 1800:  # 30 min timeout
+                saved_ts = time.mktime(time.strptime(last[:19], "%Y-%m-%dT%H:%M:%S"))
+                if time.time() - saved_ts > 1800:
                     return None
             except Exception:
                 pass
         cart = {}
         try:
-            cart = json.loads(row.get("Cart", "{}"))
+            cart = json.loads(row.get("cart", "{}"))
         except Exception:
             pass
         return {
-            "stage":   row.get("Stage", "browsing"),
-            "name":    row.get("Name", ""),
-            "address": row.get("Address", ""),
+            "stage":   row.get("stage", "browsing"),
+            "name":    row.get("name", ""),
+            "address": row.get("address", ""),
             "cart":    cart,
         }
     except Exception as e:
@@ -322,26 +312,54 @@ def load_session_state(sc, phone: str) -> dict | None:
         return None
 
 
-def clear_session_state(sc, phone: str):
-    """Clear saved session after order is complete."""
+def clear_session_state(phone: str):
+    """Reset session state after order complete."""
     try:
-        try:
-            ws = sc.open("TechSquad").worksheet("Sessions")
-        except Exception:
-            return  # Sessions tab not created yet — skip silently
-        rows = ws.get_all_records()
-        idx  = next(
-            (i + 2 for i, r in enumerate(rows) if str(r.get("Phone", "")) == str(phone)),
-            None
-        )
-        if idx:
-            ws.update(f"A{idx}:F{idx}", [[phone, "browsing", "", "", "{}", time.strftime("%Y-%m-%d %H:%M")]])
+        data = {
+            "phone":      phone,
+            "stage":      "browsing",
+            "name":       "",
+            "address":    "",
+            "cart":       "{}",
+            "updated_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        }
+        if CLIENT_ID:
+            data["client_id"] = CLIENT_ID
+        supabase.table("sessions").upsert(
+            data, on_conflict="phone,client_id"
+        ).execute()
     except Exception as e:
         print(f"[Sessions] Clear failed: {e}")
 
 
+def get_all_customers():
+    """Fetch all customers for broadcast."""
+    try:
+        query = supabase.table("customers").select("phone")
+        if CLIENT_ID:
+            query = query.eq("client_id", CLIENT_ID)
+        result = query.execute()
+        return result.data or []
+    except Exception as e:
+        print(f"[Supabase] Get customers failed: {e}")
+        return []
+
+
+def get_all_orders():
+    """Fetch all orders for admin dashboard."""
+    try:
+        query = supabase.table("orders").select("*")
+        if CLIENT_ID:
+            query = query.eq("client_id", CLIENT_ID)
+        result = query.order("created_at", desc=True).limit(100).execute()
+        return result.data or []
+    except Exception as e:
+        print(f"[Supabase] Get orders failed: {e}")
+        return []
+
+
 # ══════════════════════════════════════════════════════
-# 4.  CART HELPERS
+# 6.  CART HELPERS
 # ══════════════════════════════════════════════════════
 def price_map(inventory: list) -> dict:
     return {p.get("Product"): int(p.get("Price", 0)) for p in inventory}
@@ -395,30 +413,21 @@ def find_upsell(cart: dict, inventory: list):
 
 
 # ══════════════════════════════════════════════════════
-# 5.  AI ENGINE
-#     FIX [9]: Auto-switch Groq → Gemini → Claude
-#     based on AI_ENGINE env var
-#     FIX [10]: Token usage logger
+# 7.  TOKEN LOGGER
 # ══════════════════════════════════════════════════════
 def log_tokens(count: int):
-    """FIX [10]: Track daily token usage so you know your costs."""
     today = time.strftime("%Y-%m-%d")
     token_log[today] = token_log.get(today, 0) + count
-    if token_log[today] % 10000 < count:  # log every ~10k tokens
+    if token_log[today] % 10000 < count:
         print(f"[Tokens] {today}: {token_log[today]:,} tokens used today")
 
 
+# ══════════════════════════════════════════════════════
+# 8.  AI ENGINE
+# ══════════════════════════════════════════════════════
 def ask_ai(system_prompt: str, history: list) -> str:
-    """
-    FIX [9]: Single function, switches AI based on AI_ENGINE env var.
-    Switch anytime with zero code changes:
-      AI_ENGINE=groq    → free, fast, good enough
-      AI_ENGINE=gemini  → cheap, smart, ₦2,300/month at scale
-      AI_ENGINE=claude  → premium, best, for high-value clients
-    """
     engine = AI_ENGINE
 
-    # ── GROQ (free) ──────────────────────────────────
     if engine == "groq":
         if not GROQ_API_KEY:
             return "GROQ_API_KEY not set."
@@ -432,7 +441,7 @@ def ask_ai(system_prompt: str, history: list) -> str:
                 json={
                     "model": GROQ_MODEL,
                     "messages": [{"role": "system", "content": system_prompt}] + history,
-                    "max_tokens": 350,      # FIX: was 600, cut output cost
+                    "max_tokens": 350,
                     "temperature": 0.6,
                 },
                 timeout=30,
@@ -446,17 +455,14 @@ def ask_ai(system_prompt: str, history: list) -> str:
             print(f"[Groq] {e}")
             return "One moment, please try again."
 
-    # ── GEMINI FLASH (cheapest paid) ─────────────────
     if engine == "gemini":
         if not GEMINI_API_KEY:
             return "GEMINI_API_KEY not set."
         try:
-            # Convert history to Gemini format
             contents = []
             for msg in history:
                 role = "user" if msg["role"] == "user" else "model"
                 contents.append({"role": role, "parts": [{"text": msg["content"]}]})
-
             resp = requests.post(
                 f"https://generativelanguage.googleapis.com/v1beta/models/"
                 f"gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}",
@@ -469,14 +475,12 @@ def ask_ai(system_prompt: str, history: list) -> str:
             )
             data  = resp.json()
             reply = data["candidates"][0]["content"]["parts"][0]["text"]
-            # Gemini doesn't return token count in basic response — estimate
             log_tokens(len(system_prompt.split()) + len(reply.split()))
             return reply
         except Exception as e:
             print(f"[Gemini] {e}")
             return "One moment, please try again."
 
-    # ── CLAUDE SONNET (premium) ───────────────────────
     if engine == "claude":
         if not ANTHROPIC_API_KEY:
             return "ANTHROPIC_API_KEY not set."
@@ -490,7 +494,7 @@ def ask_ai(system_prompt: str, history: list) -> str:
                 },
                 json={
                     "model": "claude-sonnet-4-20250514",
-                    "max_tokens": 350,      # FIX: cut output tokens
+                    "max_tokens": 350,
                     "system": system_prompt,
                     "messages": history,
                 },
@@ -510,14 +514,9 @@ def ask_ai(system_prompt: str, history: list) -> str:
 
 
 # ══════════════════════════════════════════════════════
-# 6.  SYSTEM PROMPT  (FIX [1]: cut from ~800 to ~280 tokens)
+# 9.  SYSTEM PROMPT
 # ══════════════════════════════════════════════════════
 def build_prompt(inventory, profile, cart) -> str:
-    """
-    FIX [1]: Drastically shortened prompt.
-    Removed redundant explanations, examples, and repetition.
-    Same behaviour, 65% fewer input tokens.
-    """
     available = []
     for p in inventory:
         try:
@@ -560,15 +559,15 @@ RULES:
 
 
 # ══════════════════════════════════════════════════════
-# 7.  CHECKOUT STATE MACHINE
+# 10. CHECKOUT STATE MACHINE
 # ══════════════════════════════════════════════════════
-def handle_checkout_state(uid: str, text: str, session: dict, sc):
+def handle_checkout_state(uid: str, text: str, session: dict):
     stage = session.get("stage", "browsing")
 
     if stage == "awaiting_name":
         session["name"]  = text.strip().title()
         session["stage"] = "awaiting_address"
-        save_session_state(sc, uid, session)   # FIX [3]
+        save_session_state(uid, session)
         return (
             f"Nice to meet you, {session['name']}! 😊\n"
             f"What's your delivery address? (street, area, city)"
@@ -576,8 +575,8 @@ def handle_checkout_state(uid: str, text: str, session: dict, sc):
 
     if stage == "awaiting_address":
         session["address"] = text.strip()
-        save_session_state(sc, uid, session)   # FIX [3]
-        return _generate_receipt(uid, session, sc)
+        save_session_state(uid, session)
+        return _generate_receipt(uid, session)
 
     if stage == "awaiting_address_confirm":
         yes = {"yes","yeah","yep","y","correct","ok","okay","sure","yh","confirm","use it"}
@@ -585,18 +584,18 @@ def handle_checkout_state(uid: str, text: str, session: dict, sc):
             session["address"] = session["saved_address"]
         else:
             session["address"] = text.strip()
-        return _generate_receipt(uid, session, sc)
+        return _generate_receipt(uid, session)
 
     return None
 
 
-def _generate_receipt(uid: str, session: dict, sc) -> str:
-    inventory  = get_inventory(sc)
-    order_id   = f"TS-{uuid.uuid4().hex[:6].upper()}"
-    name       = session["name"]
-    address    = session["address"]
-    cart       = session.get("cart", {})
-    pm         = price_map(inventory)
+def _generate_receipt(uid: str, session: dict) -> str:
+    inventory = get_inventory()
+    order_id  = f"TS-{uuid.uuid4().hex[:6].upper()}"
+    name      = session["name"]
+    address   = session["address"]
+    cart      = session.get("cart", {})
+    pm        = price_map(inventory)
 
     lines = []
     total = 0
@@ -620,13 +619,11 @@ def _generate_receipt(uid: str, session: dict, sc) -> str:
         f"Save your Order ID: *{order_id}*"
     )
 
-    # Log to Sheets
-    log_order(sc, order_id, uid, name, cart_log_text(cart, inventory), address)
-    save_profile(sc, uid, name, address)
-    clear_session_state(sc, uid)    # FIX [3]: clean up saved state
+    log_order(order_id, uid, name, cart_log_text(cart, inventory), address)
+    save_profile(uid, name, address)
+    clear_session_state(uid)
     print(f"[ORDER] {order_id} → {uid}")
 
-    # Reset session
     session.update({
         "cart": {}, "stage": "browsing", "history": [],
         "name": "", "address": "", "upsell_done": False,
@@ -635,12 +632,11 @@ def _generate_receipt(uid: str, session: dict, sc) -> str:
 
 
 # ══════════════════════════════════════════════════════
-# 8.  MAIN CONVERSATION PROCESSOR
+# 11. MAIN CONVERSATION PROCESSOR
 # ══════════════════════════════════════════════════════
 def process_conversation(uid: str, text: str):
     session = get_session(uid)
 
-    # FIX [11]: Queue lock — wait up to 5s if processing
     waited = 0
     while session.get("processing") and waited < 5:
         time.sleep(1)
@@ -648,34 +644,27 @@ def process_conversation(uid: str, text: str):
     session["processing"] = True
 
     try:
-        sc = connect_sheets()
-        if not sc:
-            time.sleep(random.uniform(1.5, 3.5))
-            send_whatsapp(uid, "Database syncing. Try again shortly.")
-            return
-
-        inventory  = get_inventory(sc)
+        inventory  = get_inventory()
         text_lower = text.lower().strip()
 
-        # ── STEP 1: Restore session from Sheets if Render restarted ──
+        # STEP 1: Restore session if Render restarted
         if session.get("stage") == "browsing" and not session.get("cart"):
-            saved = load_session_state(sc, uid)
+            saved = load_session_state(uid)
             if saved and saved.get("stage") != "browsing":
                 session.update(saved)
                 print(f"[Session] Restored {uid}: {saved['stage']}")
 
-        # ── STEP 2: Checkout state machine (name/address steps) ──
-        state_reply = handle_checkout_state(uid, text, session, sc)
+        # STEP 2: Checkout state machine
+        state_reply = handle_checkout_state(uid, text, session)
         if state_reply:
             time.sleep(random.uniform(1.5, 3.5))
             send_whatsapp(uid, state_reply)
             return
 
-        # ── STEP 3: Parse cart items BEFORE checkout logic ──
+        # STEP 3: Parse cart items
         import re as _re
         added_items = []
 
-        # Parse storefront format: "2x Product Name - NGN 10,000"
         sf_matches = _re.findall(r"(\d+)x\s+(.+?)\s+-\s+NGN", text)
         if sf_matches:
             for qty_str, item_name in sf_matches:
@@ -696,7 +685,6 @@ def process_conversation(uid: str, text: str):
                         added_items.append((pname, qty))
                         break
         else:
-            # Natural text: customer types product name
             for p in inventory:
                 pname = p.get("Product", "")
                 try:
@@ -714,9 +702,9 @@ def process_conversation(uid: str, text: str):
                     added_items.append((pname, qty))
 
         if added_items:
-            save_session_state(sc, uid, session)
+            save_session_state(uid, session)
 
-        # ── STEP 4: Checkout trigger ──
+        # STEP 4: Checkout trigger
         is_order_msg = (
             "i would like to order" in text_lower or
             "please confirm my order" in text_lower
@@ -728,7 +716,7 @@ def process_conversation(uid: str, text: str):
                 time.sleep(random.uniform(1.5, 3.5))
                 send_whatsapp(uid, msg)
                 return
-            profile = get_profile(sc, uid)
+            profile = get_profile(uid)
             if profile:
                 session["stage"]         = "awaiting_address_confirm"
                 session["name"]          = profile.get("Name", "")
@@ -741,14 +729,14 @@ def process_conversation(uid: str, text: str):
                 session["stage"] = "awaiting_name"
                 reply = "Here's your cart:\n" + cart_display(cart, inventory)
                 reply += "\n\nWhat's your full name for delivery?"
-            save_session_state(sc, uid, session)
+            save_session_state(uid, session)
             time.sleep(random.uniform(1.5, 3.5))
             send_whatsapp(uid, reply)
             return
 
-        # ── STEP 5: Order tracking ──
+        # STEP 5: Order tracking
         if any(t in text_lower for t in TRACK_TRIGGERS):
-            order_hist = get_order_history(sc, uid)
+            order_hist = get_order_history(uid)
             if order_hist:
                 last = order_hist[-1]
                 reply = (
@@ -764,9 +752,9 @@ def process_conversation(uid: str, text: str):
             send_whatsapp(uid, reply)
             return
 
-        # ── STEP 6: AI reply ──
+        # STEP 6: AI reply
         if session.get("profile") is None:
-            session["profile"] = get_profile(sc, uid)
+            session["profile"] = get_profile(uid)
         profile = session["profile"]
 
         system_prompt = build_prompt(inventory, profile, session["cart"])
@@ -776,7 +764,7 @@ def process_conversation(uid: str, text: str):
         reply = ask_ai(system_prompt, session["history"])
         session["history"].append({"role": "assistant", "content": reply})
 
-        # ── STEP 7: Upsell once per order ──
+        # STEP 7: Upsell once per order
         if added_items and not session.get("upsell_done"):
             suggestion = find_upsell(session["cart"], inventory)
             if suggestion:
@@ -788,7 +776,6 @@ def process_conversation(uid: str, text: str):
 
         time.sleep(random.uniform(1.5, 3.5))
         send_whatsapp(uid, reply)
-
 
     except Exception as e:
         print(f"[Error] {uid}: {e}")
@@ -803,11 +790,10 @@ def process_conversation(uid: str, text: str):
 
 
 # ══════════════════════════════════════════════════════
-# 9.  WEBHOOK
+# 12. WEBHOOK
 # ══════════════════════════════════════════════════════
 @app.route("/webhook", methods=["GET"])
 def webhook_verify():
-    """Meta API webhook verification."""
     mode      = request.args.get("hub.mode")
     token     = request.args.get("hub.verify_token")
     challenge = request.args.get("hub.challenge")
@@ -864,16 +850,12 @@ def webhook():
 
 
 # ══════════════════════════════════════════════════════
-# 10. STOREFRONT  — working cart, mobile + PC optimised
+# 13. STOREFRONT
 # ══════════════════════════════════════════════════════
 @app.route("/shop/<vendor_name>")
 def shop(vendor_name):
     try:
-        sc = connect_sheets()
-        if not sc:
-            return "Database unavailable.", 500
-
-        products     = get_inventory(sc)
+        products     = get_inventory()
         vendor_title = vendor_name.replace("_", " ").title()
 
         import json as _json
@@ -941,18 +923,14 @@ body{font-family:'Sora',sans-serif;background:var(--bg);color:var(--text);min-he
 .btn-soldout{background:#1a1a1a;color:var(--muted);border:1px solid var(--border);font-size:12px;font-weight:600;padding:9px 14px;border-radius:8px;cursor:not-allowed}
 .ftr{text-align:center;padding:20px;color:var(--muted);font-size:11px;border-top:1px solid var(--border);margin-top:10px}
 .ftr a{color:var(--green);text-decoration:none}
-/* TOAST */
 #toast{position:fixed;top:74px;left:50%;transform:translateX(-50%) translateY(-8px);background:#0d2211;border:1px solid var(--green);color:var(--green);font-size:13px;font-weight:600;padding:9px 18px;border-radius:30px;opacity:0;pointer-events:none;z-index:9999;transition:all .25s;white-space:nowrap}
 #toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
-/* CART BUTTON */
 #cartBtn{position:fixed;bottom:0;left:0;right:0;background:var(--green);color:#000;border:none;font-family:'Sora',sans-serif;font-weight:700;font-size:15px;padding:16px 20px;cursor:pointer;z-index:500;display:none;align-items:center;justify-content:center;gap:10px;transition:opacity .15s}
 #cartBtn:hover{opacity:.9}
 #cartBtn.on{display:flex}
 .cbadge{background:#000;color:var(--green);font-size:12px;font-weight:700;padding:2px 10px;border-radius:20px}
-/* OVERLAY */
 #ov{position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:600;opacity:0;pointer-events:none;transition:opacity .25s}
 #ov.on{opacity:1;pointer-events:all}
-/* PANEL */
 #panel{position:fixed;bottom:0;left:0;right:0;background:#0d1a10;border-top:2px solid var(--green);border-radius:20px 20px 0 0;z-index:700;max-height:85vh;display:flex;flex-direction:column;transform:translateY(100%);transition:transform .3s cubic-bezier(.4,0,.2,1)}
 #panel.on{transform:translateY(0)}
 @media(min-width:768px){
@@ -994,7 +972,7 @@ var tt;
 function addItem(id){
   cart[id]=(cart[id]||0)+1;
   draw();
-  show_toast(P[id].name+' added! Tap cart to view Ὥ2');
+  show_toast(P[id].name+' added! Tap cart to view 🛒');
   var c=document.getElementById('c'+id);
   if(c)c.classList.add('inc');
   var b=c?c.querySelector('.btn-add'):null;
@@ -1071,10 +1049,10 @@ function send_order(){
             "<link href='https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700&display=swap' rel='stylesheet'>"
             f"<style>{CSS}</style>"
             "</head><body>"
-            f"<header class='hdr'><h1>{vendor_title}</h1><p>Powered by The Tech Squad</p></header>"
+            f"<header class='hdr'><h1>{vendor_title}</h1><p>Powered by CodedLabs</p></header>"
             "<div id='toast'></div>"
             f"<div class='grid'>{cards}</div>"
-            f"<footer class='ftr'>The Tech Squad &middot; <a href='https://wa.me/{BOT_PHONE}'>Chat with Jordan</a></footer>"
+            f"<footer class='ftr'>Powered by CodedLabs &middot; <a href='https://wa.me/{BOT_PHONE}'>Chat with Jordan</a></footer>"
             "<button id='cartBtn' onclick='open_panel()'>"
             "&#x1F6D2; View Cart <span class='cbadge' id='cnt'>0 items</span>"
             "</button>"
@@ -1101,7 +1079,7 @@ function send_order(){
 
 
 # ══════════════════════════════════════════════════════
-# 11. BROADCAST  (FIX [6]: rate limited + max 100/hour)
+# 14. BROADCAST
 # ══════════════════════════════════════════════════════
 @app.route("/broadcast", methods=["POST"])
 def broadcast():
@@ -1111,27 +1089,23 @@ def broadcast():
     msg = body.get("message", "").strip()
     if not msg:
         return jsonify({"error": "message required"}), 400
-    sc = connect_sheets()
-    if not sc:
-        return jsonify({"error": "Database unavailable"}), 500
 
-    customers    = sc.open("TechSquad").worksheet("Customers").get_all_records()
+    customers    = get_all_customers()
     sent, failed = 0, 0
     hourly_count = 0
 
     for c in customers:
-        # FIX [6]: Cap at 100 per hour to avoid WhatsApp spam flag
         if hourly_count >= BROADCAST_HOURLY:
             print(f"[Broadcast] Hourly limit reached. {sent} sent, stopping.")
             break
-        phone = str(c.get("Phone", "")).strip()
+        phone = str(c.get("phone", "")).strip()
         if not phone:
             continue
         try:
             send_whatsapp(phone, msg)
-            sent        += 1
+            sent         += 1
             hourly_count += 1
-            time.sleep(BROADCAST_DELAY)   # FIX [6]: 3s gap (was 1.2s)
+            time.sleep(BROADCAST_DELAY)
         except Exception as e:
             print(f"[Broadcast] {phone}: {e}")
             failed += 1
@@ -1140,40 +1114,36 @@ def broadcast():
 
 
 # ══════════════════════════════════════════════════════
-# 12. ADMIN DASHBOARD
+# 15. ADMIN DASHBOARD
 # ══════════════════════════════════════════════════════
 @app.route("/admin")
 def admin():
     if request.args.get("secret") != ADMIN_SECRET:
         return "<h2 style='font-family:sans-serif;color:red;padding:40px'>Unauthorized</h2>", 403
-    sc = connect_sheets()
-    if not sc:
-        return "Database unavailable", 500
 
-    inventory = get_inventory(sc)
-    customers = sc.open("TechSquad").worksheet("Customers").get_all_records()
-    sales     = sc.open("TechSquad").worksheet("Sales").get_all_records()
+    inventory  = get_inventory()
+    customers  = get_all_customers()
+    sales      = get_all_orders()
 
     total_orders    = len(sales)
-    pending         = sum(1 for s in sales if str(s.get("Status","")).lower() == "pending")
-    delivered       = sum(1 for s in sales if str(s.get("Status","")).lower() == "delivered")
+    pending         = sum(1 for s in sales if str(s.get("status","")).lower() == "pending")
+    delivered       = sum(1 for s in sales if str(s.get("status","")).lower() == "delivered")
     total_customers = len(customers)
     low_stock       = [p.get("Product","") for p in inventory if int(p.get("Stock",0) or 0) <= 3]
     today           = time.strftime("%Y-%m-%d")
     tokens_today    = token_log.get(today, 0)
-    ai_label        = {"groq":"CodedLabs AI","gemini":"CodedLabs AI","claude":"CodedLabs AI"}.get(AI_ENGINE, AI_ENGINE)
+    ai_label        = "CodedLabs AI"
 
     sales_rows = ""
-    for s in reversed(sales[-100:]):
-        status = str(s.get("Status","Pending"))
+    for s in sales[:100]:
+        status = str(s.get("status","Pending"))
         color  = "#22c55e" if status.lower()=="delivered" else "#f59e0b" if status.lower()=="pending" else "#3b82f6"
         sales_rows += f"""<tr>
-          <td class="mono">{s.get('OrderID','—')}</td>
-          <td>{s.get('Name','—')}</td>
-          <td class="sm muted">{s.get('Items','—')}</td>
-          <td>{s.get('Address','—')}</td>
+          <td class="mono">{s.get('id','—')}</td>
+          <td>{s.get('customer_phone','—')}</td>
+          <td class="sm muted">{s.get('items','—')}</td>
           <td><span class="badge" style="background:{color}22;color:{color}">{status}</span></td>
-          <td class="sm muted">{s.get('Date','—')}</td>
+          <td class="sm muted">{s.get('created_at','—')}</td>
         </tr>"""
 
     inv_rows = ""
@@ -1195,7 +1165,7 @@ def admin():
     return f"""<!DOCTYPE html>
 <html lang="en"><head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Tech Squad Admin</title>
+<title>CodedLabs Admin</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&display=swap" rel="stylesheet">
 <style>
 *,*::before,*::after{{box-sizing:border-box;margin:0;padding:0}}
@@ -1227,7 +1197,7 @@ textarea:focus{{border-color:var(--g)}}
 .btn:hover{{opacity:.85}} #result{{margin-top:10px;font-size:12px;color:var(--g);min-height:16px}}
 </style></head><body>
 <header>
-  <h1>⚡ Tech Squad — Admin</h1>
+  <h1>⚡ CodedLabs Admin</h1>
   <span class="tag">{ai_label}</span>
 </header>
 <div class="wrap">
@@ -1242,7 +1212,7 @@ textarea:focus{{border-color:var(--g)}}
   <div class="card">
     <div class="card-head">📦 Orders (last 100)</div>
     <div class="tbl-wrap"><table>
-      <thead><tr><th>Order ID</th><th>Customer</th><th>Items</th><th>Address</th><th>Status</th><th>Date</th></tr></thead>
+      <thead><tr><th>Order ID</th><th>Phone</th><th>Items</th><th>Status</th><th>Date</th></tr></thead>
       <tbody>{sales_rows}</tbody>
     </table></div>
   </div>
@@ -1252,10 +1222,10 @@ textarea:focus{{border-color:var(--g)}}
     <tbody>{inv_rows}</tbody></table>
   </div>
   <div class="card">
-    <div class="card-head">📣 Broadcast (max {BROADCAST_HOURLY}/hour, {BROADCAST_DELAY}s gap)</div>
+    <div class="card-head">📣 Broadcast (max {BROADCAST_HOURLY}/hour)</div>
     <div class="bcast">
-      <p>Send to all {total_customers} customers. Max 100 per hour to avoid WhatsApp bans.</p>
-      <textarea id="msg" placeholder="Flash sale today! Shop: {CATALOG_URL}"></textarea>
+      <p>Send to all {total_customers} customers. Max 100 per hour.</p>
+      <textarea id="msg" placeholder="Flash sale today! Shop now..."></textarea>
       <br><button class="btn" onclick="send()">Send to All Customers</button>
       <div id="result"></div>
     </div>
@@ -1266,7 +1236,7 @@ async function send(){{
   const msg=document.getElementById('msg').value.trim();
   const r=document.getElementById('result');
   if(!msg){{r.textContent='Write a message first.';return;}}
-  r.textContent='Sending... (this may take a while)';
+  r.textContent='Sending...';
   try{{
     const res=await fetch('/broadcast',{{method:'POST',
       headers:{{'Content-Type':'application/json'}},
@@ -1280,10 +1250,8 @@ async function send(){{
 
 
 # ══════════════════════════════════════════════════════
-# 13. UTILITY ENDPOINTS
+# 16. UTILITY ENDPOINTS
 # ══════════════════════════════════════════════════════
-
-# FIX [7]: Manual cache refresh
 @app.route("/refresh")
 def refresh():
     if request.args.get("secret") != ADMIN_SECRET:
@@ -1291,23 +1259,20 @@ def refresh():
     inventory_cache["data"]         = None
     inventory_cache["last_updated"] = 0
     profile_cache.clear()
-    return "Cache cleared. Next request will fetch fresh data.", 200
+    return "Cache cleared.", 200
 
 
-# FIX [8]: Keep-alive ping for cron-job.org
 @app.route("/ping")
 def ping():
     return "pong", 200
 
 
-# Health check
 @app.route("/")
 def health():
     today  = time.strftime("%Y-%m-%d")
     tokens = token_log.get(today, 0)
-    engine = {"groq":"CodedLabs AI","gemini":"CodedLabs AI","claude":"CodedLabs AI"}.get(AI_ENGINE, AI_ENGINE)
     return (
-        f"System Online | AI: {engine} | "
+        f"Jordan v5 Online | AI: {AI_ENGINE} | "
         f"Tokens today: {tokens:,} | "
         f"Active sessions: {len(sessions)}"
     ), 200
