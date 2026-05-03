@@ -1233,7 +1233,7 @@ textarea{{resize:vertical;min-height:70px}}
 .modal-close{{background:none;border:none;color:var(--m);font-size:22px;cursor:pointer;line-height:1}}
 #toast2{{position:fixed;top:20px;right:20px;background:#0d2211;border:1px solid var(--g);color:var(--g);font-size:13px;font-weight:600;padding:10px 18px;border-radius:10px;opacity:0;pointer-events:none;z-index:9999;transition:all .25s}}
 #toast2.on{{opacity:1}}
-</style></head><body>
+</style></head><body data-secret="{ADMIN_SECRET}">
 
 <header>
   <h1>⚡ CodedLabs Commerce OS</h1>
@@ -1335,132 +1335,149 @@ textarea{{resize:vertical;min-height:70px}}
 </div>
 
 <script>
-var SECRET = '{ADMIN_SECRET}';
+var SECRET = document.body.dataset.secret;
 
 // ── TABS ──
-function switchTab(name, el){{
-  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('on'));
-  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('on'));
-  document.getElementById('tab-'+name).classList.add('on');
+function switchTab(name, el) {{
+  document.querySelectorAll('.panel').forEach(function(p) {{ p.classList.remove('on'); }});
+  document.querySelectorAll('.tab').forEach(function(t) {{ t.classList.remove('on'); }});
+  document.getElementById('tab-' + name).classList.add('on');
   el.classList.add('on');
-  if(name==='products') loadProducts();
+  if (name === 'products') loadProducts();
 }}
 
 // ── TOAST ──
-function toast(msg,err){{
-  var el=document.getElementById('toast2');
-  el.textContent=msg;
-  el.style.borderColor=err?'#ef4444':'#25D366';
-  el.style.color=err?'#ef4444':'#25D366';
+function toast(msg, err) {{
+  var el = document.getElementById('toast2');
+  el.textContent = msg;
+  el.style.borderColor = err ? '#ef4444' : '#25D366';
+  el.style.color = err ? '#ef4444' : '#25D366';
   el.classList.add('on');
-  setTimeout(()=>el.classList.remove('on'),2500);
+  setTimeout(function() {{ el.classList.remove('on'); }}, 2500);
 }}
 
 // ── PRODUCTS ──
-var allProducts=[];
+var allProducts = [];
 
-async function loadProducts(){{
-  try{{
-    const res=await fetch('/admin/products?secret='+SECRET);
-    allProducts=await res.json();
+async function loadProducts() {{
+  try {{
+    var res = await fetch('/admin/products?secret=' + SECRET);
+    allProducts = await res.json();
     renderProducts(allProducts);
-  }}catch(e){{toast('Failed to load products',true);}}
+  }} catch(e) {{ toast('Failed to load products', true); }}
 }}
 
-function renderProducts(products){{
-  var grid=document.getElementById('prod-grid');
-  if(!products.length){{grid.innerHTML='<p style="color:var(--m);font-size:13px;padding:10px">No products yet. Click Add Product to get started.</p>';return;}}
-  grid.innerHTML=products.map(function(p,i){{
-    var stockColor=p.stock==0?'status-out':p.stock<=3?'status-low':'status-ok';
-    var stockLabel=p.stock==0?'Out of Stock':p.stock<=3?'Low Stock ('+p.stock+')':p.stock+' in stock';
-    var img=p.image_url?'<img class="prod-img" src="'+p.image_url+'" onerror="this.style.display=\'none\'">':'<div class="prod-img-placeholder">'+p.name.substring(0,2).toUpperCase()+'</div>';
-    return '<div class="prod-card">'+img+'<div class="prod-info"><div class="prod-name">'+p.name+'</div><div class="prod-price">NGN '+parseInt(p.price).toLocaleString()+'</div><div class="prod-stock '+stockColor+'">'+stockLabel+'</div><div class="prod-actions"><button class="act-btn" onclick="editProduct('+i+')">Edit</button><button class="del-btn" onclick="deleteProduct(\''+p.id+'\')">Delete</button></div></div></div>';
+function renderProducts(products) {{
+  var grid = document.getElementById('prod-grid');
+  if (!products.length) {{
+    grid.innerHTML = '<p style="color:var(--m);font-size:13px;padding:10px">No products yet. Click Add Product to get started.</p>';
+    return;
+  }}
+  grid.innerHTML = products.map(function(p, i) {{
+    var stockColor = p.stock == 0 ? 'status-out' : p.stock <= 3 ? 'status-low' : 'status-ok';
+    var stockLabel = p.stock == 0 ? 'Out of Stock' : p.stock <= 3 ? 'Low Stock (' + p.stock + ')' : p.stock + ' in stock';
+    var img = p.image_url
+      ? '<img class="prod-img" src="' + p.image_url + '" onerror="this.style.display=\'none\'">'
+      : '<div class="prod-img-placeholder">' + p.name.substring(0, 2).toUpperCase() + '</div>';
+    return '<div class="prod-card">' + img +
+      '<div class="prod-info">' +
+      '<div class="prod-name">' + p.name + '</div>' +
+      '<div class="prod-price">NGN ' + parseInt(p.price).toLocaleString() + '</div>' +
+      '<div class="prod-stock ' + stockColor + '">' + stockLabel + '</div>' +
+      '<div class="prod-actions">' +
+      '<button class="act-btn" onclick="editProduct(' + i + ')">Edit</button>' +
+      '<button class="del-btn" onclick="deleteProduct(\'' + p.id + '\')">Delete</button>' +
+      '</div></div></div>';
   }}).join('');
 }}
 
-function openAddModal(){{
-  document.getElementById('modal-title').textContent='Add Product';
-  document.getElementById('edit-id').value='';
-  document.getElementById('f-name').value='';
-  document.getElementById('f-desc').value='';
-  document.getElementById('f-price').value='';
-  document.getElementById('f-stock').value='';
-  document.getElementById('f-img').value='';
-  document.getElementById('f-tags').value='';
+function openAddModal() {{
+  document.getElementById('modal-title').textContent = 'Add Product';
+  document.getElementById('edit-id').value = '';
+  document.getElementById('f-name').value = '';
+  document.getElementById('f-desc').value = '';
+  document.getElementById('f-price').value = '';
+  document.getElementById('f-stock').value = '';
+  document.getElementById('f-img').value = '';
+  document.getElementById('f-tags').value = '';
   document.getElementById('add-modal').classList.add('on');
 }}
 
-function editProduct(i){{
-  var p=allProducts[i];
-  document.getElementById('modal-title').textContent='Edit Product';
-  document.getElementById('edit-id').value=p.id;
-  document.getElementById('f-name').value=p.name||'';
-  document.getElementById('f-desc').value=p.description||'';
-  document.getElementById('f-price').value=p.price||'';
-  document.getElementById('f-stock').value=p.stock||'';
-  document.getElementById('f-img').value=p.image_url||'';
-  document.getElementById('f-tags').value=p.tags||'';
+function editProduct(i) {{
+  var p = allProducts[i];
+  document.getElementById('modal-title').textContent = 'Edit Product';
+  document.getElementById('edit-id').value = p.id;
+  document.getElementById('f-name').value = p.name || '';
+  document.getElementById('f-desc').value = p.description || '';
+  document.getElementById('f-price').value = p.price || '';
+  document.getElementById('f-stock').value = p.stock || '';
+  document.getElementById('f-img').value = p.image_url || '';
+  document.getElementById('f-tags').value = p.tags || '';
   document.getElementById('add-modal').classList.add('on');
 }}
 
-function closeModal(){{document.getElementById('add-modal').classList.remove('on');}}
+function closeModal() {{ document.getElementById('add-modal').classList.remove('on'); }}
 
-async function saveProduct(){{
-  var id=document.getElementById('edit-id').value;
-  var data={{
-    name:document.getElementById('f-name').value.trim(),
-    description:document.getElementById('f-desc').value.trim(),
-    price:parseInt(document.getElementById('f-price').value)||0,
-    stock:parseInt(document.getElementById('f-stock').value)||0,
-    image_url:document.getElementById('f-img').value.trim(),
-    tags:document.getElementById('f-tags').value.trim(),
+async function saveProduct() {{
+  var id = document.getElementById('edit-id').value;
+  var data = {{
+    name:        document.getElementById('f-name').value.trim(),
+    description: document.getElementById('f-desc').value.trim(),
+    price:       parseInt(document.getElementById('f-price').value) || 0,
+    stock:       parseInt(document.getElementById('f-stock').value) || 0,
+    image_url:   document.getElementById('f-img').value.trim(),
+    tags:        document.getElementById('f-tags').value.trim(),
   }};
-  if(!data.name){{toast('Product name is required',true);return;}}
-  try{{
-    var url=id?'/admin/products/'+id+'?secret='+SECRET:'/admin/products?secret='+SECRET;
-    var method=id?'PUT':'POST';
-    const res=await fetch(url,{{method,headers:{{'Content-Type':'application/json'}},body:JSON.stringify(data)}});
-    const result=await res.json();
-    if(result.error){{toast(result.error,true);return;}}
-    toast(id?'Product updated!':'Product added!');
+  if (!data.name) {{ toast('Product name is required', true); return; }}
+  try {{
+    var url = id ? '/admin/products/' + id + '?secret=' + SECRET : '/admin/products?secret=' + SECRET;
+    var method = id ? 'PUT' : 'POST';
+    var res = await fetch(url, {{ method: method, headers: {{'Content-Type':'application/json'}}, body: JSON.stringify(data) }});
+    var result = await res.json();
+    if (result.error) {{ toast(result.error, true); return; }}
+    toast(id ? 'Product updated!' : 'Product added!');
     closeModal();
     loadProducts();
-  }}catch(e){{toast('Save failed',true);}}
+  }} catch(e) {{ toast('Save failed', true); }}
 }}
 
-async function deleteProduct(id){{
-  if(!confirm('Delete this product? This cannot be undone.'))return;
-  try{{
-    await fetch('/admin/products/'+id+'?secret='+SECRET,{{method:'DELETE'}});
+async function deleteProduct(id) {{
+  if (!confirm('Delete this product? This cannot be undone.')) return;
+  try {{
+    await fetch('/admin/products/' + id + '?secret=' + SECRET, {{ method: 'DELETE' }});
     toast('Product deleted');
     loadProducts();
-  }}catch(e){{toast('Delete failed',true);}}
+  }} catch(e) {{ toast('Delete failed', true); }}
 }}
 
 // ── ORDERS ──
-async function markStatus(id,status){{
-  try{{
-    await fetch('/admin/orders/'+id+'?secret='+SECRET,{{
-      method:'PUT',
-      headers:{{'Content-Type':'application/json'}},
-      body:JSON.stringify({{status}})
+async function markStatus(id, status) {{
+  try {{
+    await fetch('/admin/orders/' + id + '?secret=' + SECRET, {{
+      method: 'PUT',
+      headers: {{'Content-Type': 'application/json'}},
+      body: JSON.stringify({{ status: status }})
     }});
-    toast('Order marked as '+status);
-    setTimeout(()=>location.reload(),1000);
-  }}catch(e){{toast('Update failed',true);}}
+    toast('Order marked as ' + status);
+    setTimeout(function() {{ location.reload(); }}, 1000);
+  }} catch(e) {{ toast('Update failed', true); }}
 }}
 
 // ── BROADCAST ──
-async function sendBroadcast(){{
-  var msg=document.getElementById('msg').value.trim();
-  var r=document.getElementById('result');
-  if(!msg){{r.textContent='Write a message first.';return;}}
-  r.textContent='Sending...';
-  try{{
-    const res=await fetch('/broadcast',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{secret:SECRET,message:msg}})}});
-    const d=await res.json();
-    r.textContent='Sent to '+d.sent+' customers. ('+d.failed+' failed)';
-  }}catch(e){{r.textContent='Broadcast failed.';}}
+async function sendBroadcast() {{
+  var msg = document.getElementById('msg').value.trim();
+  var r = document.getElementById('result');
+  if (!msg) {{ r.textContent = 'Write a message first.'; return; }}
+  r.textContent = 'Sending...';
+  try {{
+    var res = await fetch('/broadcast', {{
+      method: 'POST',
+      headers: {{'Content-Type': 'application/json'}},
+      body: JSON.stringify({{ secret: SECRET, message: msg }})
+    }});
+    var d = await res.json();
+    r.textContent = 'Sent to ' + d.sent + ' customers. (' + d.failed + ' failed)';
+  }} catch(e) {{ r.textContent = 'Broadcast failed.'; }}
 }}
 </script>
 </body></html>"""
