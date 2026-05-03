@@ -23,7 +23,7 @@
 ║    CLIENT_ID           UUID of this business in clients table   ║
 ╚══════════════════════════════════════════════════════════════════╝
 """
-
+ 
 import os
 import time
 import uuid
@@ -36,11 +36,11 @@ from urllib.parse import quote
 from flask import Flask, request, jsonify
 from supabase import create_client
 from dotenv import load_dotenv
-
+ 
 load_dotenv()
-
+ 
 app = Flask(__name__)
-
+ 
 # ══════════════════════════════════════════════════════
 # 1.  CONFIGURATION
 # ══════════════════════════════════════════════════════
@@ -55,21 +55,21 @@ CATALOG_URL       = os.environ.get("CATALOG_URL", "https://bot-test-wddr.onrende
 WHATSAPP_TOKEN    = os.environ.get("WHATSAPP_TOKEN", "")
 PHONE_NUMBER_ID   = os.environ.get("PHONE_NUMBER_ID", "")
 CLIENT_ID         = os.environ.get("CLIENT_ID", "")   # UUID from clients table
-
+ 
 AI_ENGINE  = os.environ.get("AI_ENGINE", "groq").lower()
 GROQ_MODEL = "llama-3.3-70b-versatile"
 META_API_URL = f"https://graph.facebook.com/v17.0/{PHONE_NUMBER_ID}/messages"
-
+ 
 # Supabase client
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-
+ 
 # ══════════════════════════════════════════════════════
 # 2.  PHONE HELPERS
 # ══════════════════════════════════════════════════════
 def clean_phone(phone: str) -> str:
     return str(phone).replace("@c.us", "").replace("@g.us", "").replace("@lid", "").strip()
-
-
+ 
+ 
 # ══════════════════════════════════════════════════════
 # 3.  WHATSAPP SENDER (Meta Cloud API)
 # ══════════════════════════════════════════════════════
@@ -97,8 +97,8 @@ def send_whatsapp(to: str, message: str):
     except Exception as e:
         print(f"[Meta API] {e}")
         return None
-
-
+ 
+ 
 # ══════════════════════════════════════════════════════
 # 4.  IN-MEMORY STORE + CACHES
 # ══════════════════════════════════════════════════════
@@ -106,13 +106,13 @@ sessions        = {}
 inventory_cache = {"data": None, "last_updated": 0}
 profile_cache   = {}
 token_log       = {}
-
+ 
 CACHE_TTL         = 120
 PROFILE_CACHE_TTL = 300
 HISTORY_LIMIT     = 6
 BROADCAST_DELAY   = 3.0
 BROADCAST_HOURLY  = 100
-
+ 
 CHECKOUT_TRIGGERS = [
     "checkout", "done", "that's all", "thats all", "place order",
     "i'm done", "im done", "finish", "complete", "confirm",
@@ -122,8 +122,8 @@ TRACK_TRIGGERS = [
     "track", "track order", "where is my order",
     "order status", "my order", "check order"
 ]
-
-
+ 
+ 
 def get_session(uid: str) -> dict:
     if uid not in sessions:
         sessions[uid] = {
@@ -138,8 +138,8 @@ def get_session(uid: str) -> dict:
             "profile":       None,
         }
     return sessions[uid]
-
-
+ 
+ 
 # ══════════════════════════════════════════════════════
 # 5.  SUPABASE DATABASE FUNCTIONS
 # ══════════════════════════════════════════════════════
@@ -169,8 +169,8 @@ def get_inventory():
             print(f"[Supabase] Inventory fetch failed: {e}")
             return inventory_cache["data"] or []
     return inventory_cache["data"]
-
-
+ 
+ 
 def get_profile(phone: str):
     """Fetch customer profile from Supabase with 5-min cache."""
     now    = time.time()
@@ -195,8 +195,8 @@ def get_profile(phone: str):
     except Exception as e:
         print(f"[Supabase] Profile fetch failed: {e}")
         return cached["data"] if cached else None
-
-
+ 
+ 
 def save_profile(phone: str, name: str, address: str):
     """Upsert customer profile to Supabase."""
     try:
@@ -214,8 +214,8 @@ def save_profile(phone: str, name: str, address: str):
         profile_cache.pop(phone, None)
     except Exception as e:
         print(f"[Supabase] Save profile failed: {e}")
-
-
+ 
+ 
 def log_order(order_id, phone, name, items_text, address):
     """Insert order into Supabase orders table."""
     try:
@@ -232,8 +232,8 @@ def log_order(order_id, phone, name, items_text, address):
         supabase.table("orders").insert(data).execute()
     except Exception as e:
         print(f"[Supabase] Log order failed: {e}")
-
-
+ 
+ 
 def get_order_history(phone: str):
     """Fetch all orders for a customer."""
     try:
@@ -254,8 +254,8 @@ def get_order_history(phone: str):
     except Exception as e:
         print(f"[Supabase] Order history failed: {e}")
         return []
-
-
+ 
+ 
 def save_session_state(phone: str, session: dict):
     """Upsert session state to Supabase so Render restarts don't lose mid-checkout."""
     try:
@@ -275,8 +275,8 @@ def save_session_state(phone: str, session: dict):
         ).execute()
     except Exception as e:
         print(f"[Sessions] Save failed: {e}")
-
-
+ 
+ 
 def load_session_state(phone: str) -> dict | None:
     """Load saved session from Supabase after a restart."""
     try:
@@ -310,8 +310,8 @@ def load_session_state(phone: str) -> dict | None:
     except Exception as e:
         print(f"[Sessions] Load failed: {e}")
         return None
-
-
+ 
+ 
 def clear_session_state(phone: str):
     """Reset session state after order complete."""
     try:
@@ -330,8 +330,8 @@ def clear_session_state(phone: str):
         ).execute()
     except Exception as e:
         print(f"[Sessions] Clear failed: {e}")
-
-
+ 
+ 
 def get_all_customers():
     """Fetch all customers for broadcast."""
     try:
@@ -343,8 +343,8 @@ def get_all_customers():
     except Exception as e:
         print(f"[Supabase] Get customers failed: {e}")
         return []
-
-
+ 
+ 
 def get_all_orders():
     """Fetch all orders for admin dashboard."""
     try:
@@ -356,15 +356,15 @@ def get_all_orders():
     except Exception as e:
         print(f"[Supabase] Get orders failed: {e}")
         return []
-
-
+ 
+ 
 # ══════════════════════════════════════════════════════
 # 6.  CART HELPERS
 # ══════════════════════════════════════════════════════
 def price_map(inventory: list) -> dict:
     return {p.get("Product"): int(p.get("Price", 0)) for p in inventory}
-
-
+ 
+ 
 def cart_display(cart: dict, inventory: list) -> str:
     if not cart:
         return "  (empty)"
@@ -378,8 +378,8 @@ def cart_display(cart: dict, inventory: list) -> str:
     lines.append(f"  {'─' * 28}")
     lines.append(f"  *Total: NGN {total:,}*")
     return "\n".join(lines)
-
-
+ 
+ 
 def cart_log_text(cart: dict, inventory: list) -> str:
     pm    = price_map(inventory)
     parts = []
@@ -389,8 +389,8 @@ def cart_log_text(cart: dict, inventory: list) -> str:
         total += sub
         parts.append(f"{qty}x {item}")
     return ", ".join(parts) + f" | Total: NGN {total:,}"
-
-
+ 
+ 
 def find_upsell(cart: dict, inventory: list):
     cart_tags = set()
     for item in cart:
@@ -410,8 +410,8 @@ def find_upsell(cart: dict, inventory: list):
         if any(t in cart_tags for t in tags if t):
             return name
     return None
-
-
+ 
+ 
 # ══════════════════════════════════════════════════════
 # 7.  TOKEN LOGGER
 # ══════════════════════════════════════════════════════
@@ -420,14 +420,14 @@ def log_tokens(count: int):
     token_log[today] = token_log.get(today, 0) + count
     if token_log[today] % 10000 < count:
         print(f"[Tokens] {today}: {token_log[today]:,} tokens used today")
-
-
+ 
+ 
 # ══════════════════════════════════════════════════════
 # 8.  AI ENGINE
 # ══════════════════════════════════════════════════════
 def ask_ai(system_prompt: str, history: list) -> str:
     engine = AI_ENGINE
-
+ 
     if engine == "groq":
         if not GROQ_API_KEY:
             return "GROQ_API_KEY not set."
@@ -454,7 +454,7 @@ def ask_ai(system_prompt: str, history: list) -> str:
         except Exception as e:
             print(f"[Groq] {e}")
             return "One moment, please try again."
-
+ 
     if engine == "gemini":
         if not GEMINI_API_KEY:
             return "GEMINI_API_KEY not set."
@@ -480,7 +480,7 @@ def ask_ai(system_prompt: str, history: list) -> str:
         except Exception as e:
             print(f"[Gemini] {e}")
             return "One moment, please try again."
-
+ 
     if engine == "claude":
         if not ANTHROPIC_API_KEY:
             return "ANTHROPIC_API_KEY not set."
@@ -509,10 +509,10 @@ def ask_ai(system_prompt: str, history: list) -> str:
         except Exception as e:
             print(f"[Claude] {e}")
             return "One moment, please try again."
-
+ 
     return "AI_ENGINE not configured correctly."
-
-
+ 
+ 
 # ══════════════════════════════════════════════════════
 # 9.  SYSTEM PROMPT
 # ══════════════════════════════════════════════════════
@@ -529,22 +529,22 @@ def build_prompt(inventory, profile, cart) -> str:
                 f"|{p.get('Description','')}|{p.get('Tags','')}"
             )
     inv_text = "\n".join(available) or "No items in stock."
-
+ 
     profile_text = (
         f"Returning: {profile.get('Name')}, saved address: {profile.get('Address')}"
         if profile else "New customer."
     )
-
+ 
     cart_text = cart_display(cart, inventory) if cart else "Empty"
-
+ 
     return f"""You are Jordan, WhatsApp sales assistant for The Tech Squad (Nigeria).
 Be warm, human, brief. Never robotic.
-
+ 
 INVENTORY: {inv_text}
 CUSTOMER: {profile_text}
 CART: {cart_text}
 CATALOG: {CATALOG_URL}
-
+ 
 RULES:
 - On first message: greet + share catalog link
 - Add items customer mentions to cart, show updated cart after
@@ -556,14 +556,14 @@ RULES:
 - Keep replies under 4 sentences unless showing cart
 - Emojis ok, never say "As an AI"
 """
-
-
+ 
+ 
 # ══════════════════════════════════════════════════════
 # 10. CHECKOUT STATE MACHINE
 # ══════════════════════════════════════════════════════
 def handle_checkout_state(uid: str, text: str, session: dict):
     stage = session.get("stage", "browsing")
-
+ 
     if stage == "awaiting_name":
         session["name"]  = text.strip().title()
         session["stage"] = "awaiting_address"
@@ -572,12 +572,12 @@ def handle_checkout_state(uid: str, text: str, session: dict):
             f"Nice to meet you, {session['name']}! 😊\n"
             f"What's your delivery address? (street, area, city)"
         )
-
+ 
     if stage == "awaiting_address":
         session["address"] = text.strip()
         save_session_state(uid, session)
         return _generate_receipt(uid, session)
-
+ 
     if stage == "awaiting_address_confirm":
         yes = {"yes","yeah","yep","y","correct","ok","okay","sure","yh","confirm","use it"}
         if text.strip().lower() in yes:
@@ -585,10 +585,10 @@ def handle_checkout_state(uid: str, text: str, session: dict):
         else:
             session["address"] = text.strip()
         return _generate_receipt(uid, session)
-
+ 
     return None
-
-
+ 
+ 
 def _generate_receipt(uid: str, session: dict) -> str:
     inventory = get_inventory()
     order_id  = f"TS-{uuid.uuid4().hex[:6].upper()}"
@@ -596,14 +596,14 @@ def _generate_receipt(uid: str, session: dict) -> str:
     address   = session["address"]
     cart      = session.get("cart", {})
     pm        = price_map(inventory)
-
+ 
     lines = []
     total = 0
     for item, qty in cart.items():
         sub    = pm.get(item, 0) * qty
         total += sub
         lines.append(f"  {qty}x {item} — NGN {sub:,}")
-
+ 
     receipt = (
         f"ORDER CONFIRMED! 🎉\n\n"
         f"Order ID: *{order_id}*\n"
@@ -618,53 +618,53 @@ def _generate_receipt(uid: str, session: dict) -> str:
         f"Thank you! 🙏 We'll call to confirm delivery.\n"
         f"Save your Order ID: *{order_id}*"
     )
-
+ 
     log_order(order_id, uid, name, cart_log_text(cart, inventory), address)
     save_profile(uid, name, address)
     clear_session_state(uid)
     print(f"[ORDER] {order_id} → {uid}")
-
+ 
     session.update({
         "cart": {}, "stage": "browsing", "history": [],
         "name": "", "address": "", "upsell_done": False,
     })
     return receipt
-
-
+ 
+ 
 # ══════════════════════════════════════════════════════
 # 11. MAIN CONVERSATION PROCESSOR
 # ══════════════════════════════════════════════════════
 def process_conversation(uid: str, text: str):
     session = get_session(uid)
-
+ 
     waited = 0
     while session.get("processing") and waited < 5:
         time.sleep(1)
         waited += 1
     session["processing"] = True
-
+ 
     try:
         inventory  = get_inventory()
         text_lower = text.lower().strip()
-
+ 
         # STEP 1: Restore session if Render restarted
         if session.get("stage") == "browsing" and not session.get("cart"):
             saved = load_session_state(uid)
             if saved and saved.get("stage") != "browsing":
                 session.update(saved)
                 print(f"[Session] Restored {uid}: {saved['stage']}")
-
+ 
         # STEP 2: Checkout state machine
         state_reply = handle_checkout_state(uid, text, session)
         if state_reply:
             time.sleep(random.uniform(1.5, 3.5))
             send_whatsapp(uid, state_reply)
             return
-
+ 
         # STEP 3: Parse cart items
         import re as _re
         added_items = []
-
+ 
         sf_matches = _re.findall(r"(\d+)x\s+(.+?)\s+-\s+NGN", text)
         if sf_matches:
             for qty_str, item_name in sf_matches:
@@ -700,10 +700,10 @@ def process_conversation(uid: str, text: str):
                             break
                     session["cart"][pname] = session["cart"].get(pname, 0) + qty
                     added_items.append((pname, qty))
-
+ 
         if added_items:
             save_session_state(uid, session)
-
+ 
         # STEP 4: Checkout trigger
         is_order_msg = (
             "i would like to order" in text_lower or
@@ -733,7 +733,7 @@ def process_conversation(uid: str, text: str):
             time.sleep(random.uniform(1.5, 3.5))
             send_whatsapp(uid, reply)
             return
-
+ 
         # STEP 5: Order tracking
         if any(t in text_lower for t in TRACK_TRIGGERS):
             order_hist = get_order_history(uid)
@@ -751,19 +751,19 @@ def process_conversation(uid: str, text: str):
             time.sleep(random.uniform(1.5, 3.5))
             send_whatsapp(uid, reply)
             return
-
+ 
         # STEP 6: AI reply
         if session.get("profile") is None:
             session["profile"] = get_profile(uid)
         profile = session["profile"]
-
+ 
         system_prompt = build_prompt(inventory, profile, session["cart"])
         session["history"].append({"role": "user", "content": text})
         session["history"] = session["history"][-HISTORY_LIMIT:]
-
+ 
         reply = ask_ai(system_prompt, session["history"])
         session["history"].append({"role": "assistant", "content": reply})
-
+ 
         # STEP 7: Upsell once per order
         if added_items and not session.get("upsell_done"):
             suggestion = find_upsell(session["cart"], inventory)
@@ -773,10 +773,10 @@ def process_conversation(uid: str, text: str):
                 reply += "\n\nCustomers who get " + added_items[0][0]
                 reply += " usually grab " + suggestion + " too (NGN " + f"{uprice:,}" + "). Add it?"
                 session["upsell_done"] = True
-
+ 
         time.sleep(random.uniform(1.5, 3.5))
         send_whatsapp(uid, reply)
-
+ 
     except Exception as e:
         print(f"[Error] {uid}: {e}")
         traceback.print_exc()
@@ -787,8 +787,8 @@ def process_conversation(uid: str, text: str):
             pass
     finally:
         session["processing"] = False
-
-
+ 
+ 
 # ══════════════════════════════════════════════════════
 # 12. WEBHOOK
 # ══════════════════════════════════════════════════════
@@ -801,8 +801,8 @@ def webhook_verify():
         print("[Webhook] Verified by Meta")
         return challenge, 200
     return "Forbidden", 403
-
-
+ 
+ 
 @app.route("/webhook", methods=["POST"])
 def webhook():
     data = request.json
@@ -816,10 +816,10 @@ def webhook():
                 for msg in messages:
                     uid      = clean_phone(msg.get("from", ""))
                     msg_type = msg.get("type", "")
-
+ 
                     if not uid:
                         continue
-
+ 
                     if msg_type in ("image","video","audio","document","sticker"):
                         media_reply = (
                             "Hey! 👋 I cannot view images or screenshots, but no worries! "
@@ -830,7 +830,7 @@ def webhook():
                         time.sleep(random.uniform(1.5, 3.5))
                         send_whatsapp(uid, media_reply)
                         continue
-
+ 
                     if msg_type == "text":
                         text = msg.get("text", {}).get("body", "").strip()
                         if not text:
@@ -841,14 +841,14 @@ def webhook():
                         )
                         t.daemon = True
                         t.start()
-
+ 
     except Exception as e:
         print(f"[Webhook] {e}")
         traceback.print_exc()
-
+ 
     return "OK", 200
-
-
+ 
+ 
 # ══════════════════════════════════════════════════════
 # 13. STOREFRONT
 # ══════════════════════════════════════════════════════
@@ -857,12 +857,12 @@ def shop(vendor_name):
     try:
         products     = get_inventory()
         vendor_title = vendor_name.replace("_", " ").title()
-
+ 
         import json as _json
-
+ 
         product_list = []
         cards        = ""
-
+ 
         for i, p in enumerate(products):
             name  = p.get("Product", "")
             price = p.get("Price", 0)
@@ -872,19 +872,19 @@ def shop(vendor_name):
                 stock = int(p.get("Stock", 0))
             except Exception:
                 stock = 0
-
+ 
             img_tag = (
                 f'<img src="{img}" alt="{name}" loading="lazy">'
                 if img else
                 f'<div class="no-img">{name[:2].upper()}</div>'
             )
-
+ 
             if stock > 0:
                 product_list.append({"id": i, "name": name, "price": int(price)})
                 btn = f'<button class="btn-add" onclick="addItem({i})">Add to Cart</button>'
             else:
                 btn = '<span class="btn-soldout">Sold Out</span>'
-
+ 
             cards += (
                 f'<div class="card" id="c{i}">'
                 f'{img_tag}'
@@ -896,9 +896,9 @@ def shop(vendor_name):
                 f'{btn}'
                 f'</div></div></div>'
             )
-
+ 
         pdata = _json.dumps(product_list)
-
+ 
         CSS = """
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{--bg:#0a0a0a;--card:#141414;--border:#252525;--green:#25D366;--gg:rgba(37,211,102,.15);--text:#f0f0f0;--muted:#777;--red:#ef4444}
@@ -962,13 +962,13 @@ body{font-family:'Sora',sans-serif;background:var(--bg);color:var(--text);min-he
 .bc{width:100%;background:none;border:1px solid #2a2a2a;color:var(--muted);font-family:'Sora',sans-serif;font-size:12px;padding:10px;border-radius:8px;cursor:pointer;transition:all .15s}
 .bc:hover{border-color:var(--red);color:var(--red)}
 """
-
+ 
         JS = """
 var P=""" + pdata + """;
 var PHONE=\"""" + BOT_PHONE + """\";
 var cart={};
 var tt;
-
+ 
 function addItem(id){
   cart[id]=(cart[id]||0)+1;
   draw();
@@ -1040,7 +1040,7 @@ function send_order(){
   window.open('https://wa.me/'+PHONE+'?text='+encodeURIComponent(msg),'_blank');
 }
 """
-
+ 
         return (
             "<!DOCTYPE html><html lang='en'><head>"
             "<meta charset='UTF-8'>"
@@ -1072,12 +1072,12 @@ function send_order(){
             f"<script>{JS}</script>"
             "</body></html>"
         )
-
+ 
     except Exception as e:
         print(f"[Shop] {e}")
         return "Storefront is updating.", 500
-
-
+ 
+ 
 # ══════════════════════════════════════════════════════
 # 14. BROADCAST
 # ══════════════════════════════════════════════════════
@@ -1089,11 +1089,11 @@ def broadcast():
     msg = body.get("message", "").strip()
     if not msg:
         return jsonify({"error": "message required"}), 400
-
+ 
     customers    = get_all_customers()
     sent, failed = 0, 0
     hourly_count = 0
-
+ 
     for c in customers:
         if hourly_count >= BROADCAST_HOURLY:
             print(f"[Broadcast] Hourly limit reached. {sent} sent, stopping.")
@@ -1109,10 +1109,10 @@ def broadcast():
         except Exception as e:
             print(f"[Broadcast] {phone}: {e}")
             failed += 1
-
+ 
     return jsonify({"sent": sent, "failed": failed, "total": len(customers)})
-
-
+ 
+ 
 # ══════════════════════════════════════════════════════
 # 15. ADMIN DASHBOARD
 # ══════════════════════════════════════════════════════
@@ -1120,17 +1120,17 @@ def broadcast():
 def admin():
     if request.args.get("secret") != ADMIN_SECRET:
         return "<h2 style='font-family:sans-serif;color:red;padding:40px'>Unauthorized</h2>", 403
-
+ 
     customers  = get_all_customers()
     sales      = get_all_orders()
-
+ 
     total_orders    = len(sales)
     pending         = sum(1 for s in sales if str(s.get("status","")).lower() == "pending")
     delivered       = sum(1 for s in sales if str(s.get("status","")).lower() == "delivered")
     total_customers = len(customers)
     today           = time.strftime("%Y-%m-%d")
     tokens_today    = token_log.get(today, 0)
-
+ 
     sales_rows = ""
     for s in sales[:100]:
         status = str(s.get("status","Pending"))
@@ -1146,7 +1146,7 @@ def admin():
             <button class="act-btn" onclick="markStatus('{s.get('id','')}','Delivered')">✓ Delivered</button>
           </td>
         </tr>"""
-
+ 
     return f"""<!DOCTYPE html>
 <html lang="en"><head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -1227,20 +1227,20 @@ textarea{{resize:vertical;min-height:70px}}
 #toast2{{position:fixed;top:20px;right:20px;background:#0d2211;border:1px solid var(--g);color:var(--g);font-size:13px;font-weight:600;padding:10px 18px;border-radius:10px;opacity:0;pointer-events:none;z-index:9999;transition:all .25s}}
 #toast2.on{{opacity:1}}
 </style></head><body>
-
+ 
 <header>
   <h1>⚡ CodedLabs Commerce OS</h1>
   <span class="tag">CodedLabs AI</span>
 </header>
-
+ 
 <div class="tabs">
-  <button class="tab on" onclick="switchTab('orders')">📦 Orders</button>
-  <button class="tab" onclick="switchTab('products')">🗃️ Products</button>
-  <button class="tab" onclick="switchTab('broadcast')">📣 Broadcast</button>
+  <button class="tab on" onclick="switchTab('orders',this)">📦 Orders</button>
+  <button class="tab" onclick="switchTab('products',this)">🗃️ Products</button>
+  <button class="tab" onclick="switchTab('broadcast',this)">📣 Broadcast</button>
 </div>
-
+ 
 <div id="toast2"></div>
-
+ 
 <!-- ── ORDERS TAB ── -->
 <div class="panel on" id="tab-orders">
   <div class="stats">
@@ -1258,7 +1258,7 @@ textarea{{resize:vertical;min-height:70px}}
     </table></div>
   </div>
 </div>
-
+ 
 <!-- ── PRODUCTS TAB ── -->
 <div class="panel" id="tab-products">
   <div class="card">
@@ -1271,7 +1271,7 @@ textarea{{resize:vertical;min-height:70px}}
     </div>
   </div>
 </div>
-
+ 
 <!-- ── BROADCAST TAB ── -->
 <div class="panel" id="tab-broadcast">
   <div class="card">
@@ -1285,7 +1285,7 @@ textarea{{resize:vertical;min-height:70px}}
     </div>
   </div>
 </div>
-
+ 
 <!-- ── ADD PRODUCT MODAL ── -->
 <div class="modal-bg" id="add-modal">
   <div class="modal">
@@ -1326,19 +1326,19 @@ textarea{{resize:vertical;min-height:70px}}
     </div>
   </div>
 </div>
-
+ 
 <script>
 var SECRET = '{ADMIN_SECRET}';
-
+ 
 // ── TABS ──
-function switchTab(name){{
+function switchTab(name, el){{
   document.querySelectorAll('.panel').forEach(p=>p.classList.remove('on'));
   document.querySelectorAll('.tab').forEach(t=>t.classList.remove('on'));
   document.getElementById('tab-'+name).classList.add('on');
-  event.target.classList.add('on');
+  el.classList.add('on');
   if(name==='products') loadProducts();
 }}
-
+ 
 // ── TOAST ──
 function toast(msg,err){{
   var el=document.getElementById('toast2');
@@ -1348,10 +1348,10 @@ function toast(msg,err){{
   el.classList.add('on');
   setTimeout(()=>el.classList.remove('on'),2500);
 }}
-
+ 
 // ── PRODUCTS ──
 var allProducts=[];
-
+ 
 async function loadProducts(){{
   try{{
     const res=await fetch('/admin/products?secret='+SECRET);
@@ -1359,7 +1359,7 @@ async function loadProducts(){{
     renderProducts(allProducts);
   }}catch(e){{toast('Failed to load products',true);}}
 }}
-
+ 
 function renderProducts(products){{
   var grid=document.getElementById('prod-grid');
   if(!products.length){{grid.innerHTML='<p style="color:var(--m);font-size:13px;padding:10px">No products yet. Click Add Product to get started.</p>';return;}}
@@ -1370,7 +1370,7 @@ function renderProducts(products){{
     return '<div class="prod-card">'+img+'<div class="prod-info"><div class="prod-name">'+p.name+'</div><div class="prod-price">NGN '+parseInt(p.price).toLocaleString()+'</div><div class="prod-stock '+stockColor+'">'+stockLabel+'</div><div class="prod-actions"><button class="act-btn" onclick=\'editProduct('+JSON.stringify(p)+')\'>Edit</button><button class="del-btn" onclick="deleteProduct(\''+p.id+'\')">Delete</button></div></div></div>';
   }}).join('');
 }}
-
+ 
 function openAddModal(){{
   document.getElementById('modal-title').textContent='Add Product';
   document.getElementById('edit-id').value='';
@@ -1382,7 +1382,7 @@ function openAddModal(){{
   document.getElementById('f-tags').value='';
   document.getElementById('add-modal').classList.add('on');
 }}
-
+ 
 function editProduct(p){{
   document.getElementById('modal-title').textContent='Edit Product';
   document.getElementById('edit-id').value=p.id;
@@ -1394,9 +1394,9 @@ function editProduct(p){{
   document.getElementById('f-tags').value=p.tags||'';
   document.getElementById('add-modal').classList.add('on');
 }}
-
+ 
 function closeModal(){{document.getElementById('add-modal').classList.remove('on');}}
-
+ 
 async function saveProduct(){{
   var id=document.getElementById('edit-id').value;
   var data={{
@@ -1419,7 +1419,7 @@ async function saveProduct(){{
     loadProducts();
   }}catch(e){{toast('Save failed',true);}}
 }}
-
+ 
 async function deleteProduct(id){{
   if(!confirm('Delete this product? This cannot be undone.'))return;
   try{{
@@ -1428,7 +1428,7 @@ async function deleteProduct(id){{
     loadProducts();
   }}catch(e){{toast('Delete failed',true);}}
 }}
-
+ 
 // ── ORDERS ──
 async function markStatus(id,status){{
   try{{
@@ -1441,7 +1441,7 @@ async function markStatus(id,status){{
     setTimeout(()=>location.reload(),1000);
   }}catch(e){{toast('Update failed',true);}}
 }}
-
+ 
 // ── BROADCAST ──
 async function sendBroadcast(){{
   var msg=document.getElementById('msg').value.trim();
@@ -1456,8 +1456,8 @@ async function sendBroadcast(){{
 }}
 </script>
 </body></html>"""
-
-
+ 
+ 
 # ══════════════════════════════════════════════════════
 # 16. PRODUCT MANAGEMENT API
 # ══════════════════════════════════════════════════════
@@ -1471,8 +1471,8 @@ def api_update_order(order_id):
         return jsonify({"success": True})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
-
+ 
+ 
 @app.route("/admin/products", methods=["GET"])
 def api_get_products():
     if request.args.get("secret") != ADMIN_SECRET:
@@ -1485,8 +1485,8 @@ def api_get_products():
         return jsonify(result.data)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
-
+ 
+ 
 @app.route("/admin/products", methods=["POST"])
 def api_add_product():
     if request.args.get("secret") != ADMIN_SECRET:
@@ -1512,8 +1512,8 @@ def api_add_product():
         return jsonify(result.data[0])
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
-
+ 
+ 
 @app.route("/admin/products/<product_id>", methods=["PUT"])
 def api_update_product(product_id):
     if request.args.get("secret") != ADMIN_SECRET:
@@ -1534,8 +1534,8 @@ def api_update_product(product_id):
         return jsonify({"success": True})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
-
+ 
+ 
 @app.route("/admin/products/<product_id>", methods=["DELETE"])
 def api_delete_product(product_id):
     if request.args.get("secret") != ADMIN_SECRET:
@@ -1547,8 +1547,8 @@ def api_delete_product(product_id):
         return jsonify({"success": True})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
-
+ 
+ 
 # ══════════════════════════════════════════════════════
 # 17. UTILITY ENDPOINTS
 # ══════════════════════════════════════════════════════
@@ -1560,13 +1560,13 @@ def refresh():
     inventory_cache["last_updated"] = 0
     profile_cache.clear()
     return "Cache cleared.", 200
-
-
+ 
+ 
 @app.route("/ping")
 def ping():
     return "pong", 200
-
-
+ 
+ 
 @app.route("/")
 def health():
     today  = time.strftime("%Y-%m-%d")
@@ -1576,8 +1576,8 @@ def health():
         f"Tokens today: {tokens:,} | "
         f"Active sessions: {len(sessions)}"
     ), 200
-
-
+ 
+ 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
