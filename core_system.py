@@ -219,10 +219,17 @@ def save_profile(phone: str, name: str, address: str):
 def log_order(order_id, phone, name, items_text, address):
     """Insert order into Supabase orders table."""
     try:
+        # Calculate total from items_text e.g. "1x iPhone 13 Pro | Total: NGN 450,000"
+        amount = 0
+        try:
+            total_part = items_text.split("Total: NGN")[-1].strip()
+            amount = int(total_part.replace(",", "").split()[0])
+        except Exception:
+            pass
         data = {
             "customer_phone": phone,
-            "items":          f"{order_id} | {items_text}",
-            "amount":         0,
+            "items":          items_text,
+            "amount":         amount,
             "status":         "Pending",
             "created_at":     time.strftime("%Y-%m-%dT%H:%M:%S"),
         }
@@ -1136,16 +1143,15 @@ def admin():
     for s in sales[:100]:
         status = str(s.get("status","Pending"))
         color  = "#22c55e" if status.lower()=="delivered" else "#f59e0b" if status.lower()=="pending" else "#3b82f6"
+        action = f'<button class="act-btn" onclick="markStatus(\'{s.get("id","")}\',\'Delivered\')">✓ Delivered</button>' if status.lower() == "pending" else '<span style="color:#22c55e;font-size:12px;font-weight:600">✓ Done</span>'
         sales_rows += f"""<tr>
-          <td class="mono">{s.get('id','—')[:12]}...</td>
+          <td class="mono">{str(s.get('id','—'))[:8]}...</td>
           <td>{s.get('customer_phone','—')}</td>
           <td class="sm muted">{s.get('items','—')}</td>
           <td class="green">NGN {int(s.get('amount',0)):,}</td>
           <td><span class="badge" style="background:{color}22;color:{color}">{status}</span></td>
           <td class="sm muted">{str(s.get('created_at','—'))[:16]}</td>
-          <td>
-            <button class="act-btn" onclick="markStatus('{s.get('id','')}','Delivered')">✓ Delivered</button>
-          </td>
+          <td>{action}</td>
         </tr>"""
 
     return f"""<!DOCTYPE html>
@@ -1364,11 +1370,11 @@ async function loadProducts(){{
 function renderProducts(products){{
   var grid=document.getElementById('prod-grid');
   if(!products.length){{grid.innerHTML='<p style="color:var(--m);font-size:13px;padding:10px">No products yet. Click Add Product to get started.</p>';return;}}
-  grid.innerHTML=products.map(p=>{{
+  grid.innerHTML=products.map(function(p,i){{
     var stockColor=p.stock==0?'status-out':p.stock<=3?'status-low':'status-ok';
     var stockLabel=p.stock==0?'Out of Stock':p.stock<=3?'Low Stock ('+p.stock+')':p.stock+' in stock';
     var img=p.image_url?'<img class="prod-img" src="'+p.image_url+'" onerror="this.style.display=\'none\'">':'<div class="prod-img-placeholder">'+p.name.substring(0,2).toUpperCase()+'</div>';
-    return '<div class="prod-card">'+img+'<div class="prod-info"><div class="prod-name">'+p.name+'</div><div class="prod-price">NGN '+parseInt(p.price).toLocaleString()+'</div><div class="prod-stock '+stockColor+'">'+stockLabel+'</div><div class="prod-actions"><button class="act-btn" onclick=\'editProduct('+JSON.stringify(p)+')\'>Edit</button><button class="del-btn" onclick="deleteProduct(\''+p.id+'\')">Delete</button></div></div></div>';
+    return '<div class="prod-card">'+img+'<div class="prod-info"><div class="prod-name">'+p.name+'</div><div class="prod-price">NGN '+parseInt(p.price).toLocaleString()+'</div><div class="prod-stock '+stockColor+'">'+stockLabel+'</div><div class="prod-actions"><button class="act-btn" onclick="editProduct('+i+')">Edit</button><button class="del-btn" onclick="deleteProduct(\''+p.id+'\')">Delete</button></div></div></div>';
   }}).join('');
 }}
 
@@ -1384,7 +1390,8 @@ function openAddModal(){{
   document.getElementById('add-modal').classList.add('on');
 }}
 
-function editProduct(p){{
+function editProduct(i){{
+  var p=allProducts[i];
   document.getElementById('modal-title').textContent='Edit Product';
   document.getElementById('edit-id').value=p.id;
   document.getElementById('f-name').value=p.name||'';
