@@ -1121,7 +1121,6 @@ def admin():
     if request.args.get("secret") != ADMIN_SECRET:
         return "<h2 style='font-family:sans-serif;color:red;padding:40px'>Unauthorized</h2>", 403
 
-    inventory  = get_inventory()
     customers  = get_all_customers()
     sales      = get_all_orders()
 
@@ -1129,59 +1128,54 @@ def admin():
     pending         = sum(1 for s in sales if str(s.get("status","")).lower() == "pending")
     delivered       = sum(1 for s in sales if str(s.get("status","")).lower() == "delivered")
     total_customers = len(customers)
-    low_stock       = [p.get("Product","") for p in inventory if int(p.get("Stock",0) or 0) <= 3]
     today           = time.strftime("%Y-%m-%d")
     tokens_today    = token_log.get(today, 0)
-    ai_label        = "CodedLabs AI"
 
     sales_rows = ""
     for s in sales[:100]:
         status = str(s.get("status","Pending"))
         color  = "#22c55e" if status.lower()=="delivered" else "#f59e0b" if status.lower()=="pending" else "#3b82f6"
         sales_rows += f"""<tr>
-          <td class="mono">{s.get('id','—')}</td>
+          <td class="mono">{s.get('id','—')[:12]}...</td>
           <td>{s.get('customer_phone','—')}</td>
           <td class="sm muted">{s.get('items','—')}</td>
+          <td class="green">NGN {int(s.get('amount',0)):,}</td>
           <td><span class="badge" style="background:{color}22;color:{color}">{status}</span></td>
-          <td class="sm muted">{s.get('created_at','—')}</td>
+          <td class="sm muted">{str(s.get('created_at','—'))[:16]}</td>
+          <td>
+            <button class="act-btn" onclick="markStatus('{s.get('id','')}','Delivered')">✓ Delivered</button>
+          </td>
         </tr>"""
-
-    inv_rows = ""
-    for p in inventory:
-        stock = int(p.get("Stock",0) or 0)
-        sc_   = "#ef4444" if stock==0 else "#f59e0b" if stock<=3 else "#22c55e"
-        inv_rows += f"""<tr>
-          <td><strong>{p.get('Product','')}</strong></td>
-          <td class="green">NGN {int(p.get('Price',0)):,}</td>
-          <td class="sm muted">{p.get('Description','')}</td>
-          <td><strong style="color:{sc_}">{stock}</strong></td>
-        </tr>"""
-
-    low_banner = (
-        f'<div class="alert">⚠️ Low/out of stock: {", ".join(low_stock)}</div>'
-        if low_stock else ""
-    )
 
     return f"""<!DOCTYPE html>
 <html lang="en"><head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>CodedLabs Admin</title>
+<title>CodedLabs Commerce OS</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&display=swap" rel="stylesheet">
 <style>
 *,*::before,*::after{{box-sizing:border-box;margin:0;padding:0}}
-:root{{--bg:#07070e;--s:#10101a;--b:#1c1c2a;--g:#25D366;--text:#dde;--m:#555}}
+:root{{--bg:#07070e;--s:#10101a;--b:#1c1c2a;--g:#25D366;--text:#dde;--m:#666;--red:#ef4444}}
 body{{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min-height:100vh}}
-header{{background:var(--s);border-bottom:1px solid var(--b);padding:15px 28px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:10}}
-header h1{{font-size:16px;font-weight:700}}
+header{{background:var(--s);border-bottom:1px solid var(--b);padding:14px 28px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100}}
+header h1{{font-size:15px;font-weight:700;letter-spacing:-.3px}}
 .tag{{font-size:10px;background:rgba(37,211,102,.15);color:var(--g);padding:3px 10px;border-radius:20px;font-weight:600}}
-.wrap{{max-width:1200px;margin:0 auto;padding:22px 24px 60px}}
+/* TABS */
+.tabs{{display:flex;gap:4px;padding:16px 24px 0;border-bottom:1px solid var(--b);background:var(--s);position:sticky;top:49px;z-index:99}}
+.tab{{padding:9px 18px;font-size:13px;font-weight:600;color:var(--m);border:none;background:none;cursor:pointer;border-bottom:2px solid transparent;transition:all .2s}}
+.tab.on{{color:var(--g);border-bottom-color:var(--g)}}
+.tab:hover{{color:var(--text)}}
+/* PANELS */
+.panel{{display:none;max-width:1200px;margin:0 auto;padding:22px 24px 60px}}
+.panel.on{{display:block}}
+/* STATS */
 .stats{{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;margin-bottom:24px}}
 .stat{{background:var(--s);border:1px solid var(--b);border-radius:14px;padding:18px}}
 .stat-n{{font-size:24px;font-weight:700;margin-bottom:2px}}
 .stat-l{{font-size:10px;color:var(--m);text-transform:uppercase;letter-spacing:.8px}}
-.alert{{background:#231400;border:1px solid #f59e0b;border-radius:10px;padding:11px 16px;font-size:13px;color:#f59e0b;margin-bottom:20px}}
+/* CARDS */
 .card{{background:var(--s);border:1px solid var(--b);border-radius:14px;overflow:hidden;margin-bottom:22px}}
-.card-head{{padding:12px 18px;border-bottom:1px solid var(--b);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--m)}}
+.card-head{{padding:12px 18px;border-bottom:1px solid var(--b);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--m);display:flex;align-items:center;justify-content:space-between}}
+/* TABLE */
 .tbl-wrap{{overflow-x:auto}}
 table{{width:100%;border-collapse:collapse;font-size:12px}}
 th{{padding:10px 14px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.7px;color:var(--m);font-weight:600;border-bottom:1px solid var(--b)}}
@@ -1190,67 +1184,373 @@ tr:hover td{{background:rgba(255,255,255,.015)}}
 .mono{{font-family:monospace;font-size:11px}} .muted{{color:var(--m)}} .sm{{font-size:11px}}
 .green{{color:var(--g);font-weight:600}}
 .badge{{padding:3px 10px;border-radius:20px;font-size:10px;font-weight:700}}
-.bcast{{padding:18px}} .bcast p{{font-size:13px;color:var(--m);margin-bottom:10px}}
-textarea{{width:100%;background:#0b0b15;border:1px solid var(--b);border-radius:10px;color:var(--text);padding:12px;font-family:inherit;font-size:13px;resize:vertical;outline:none;transition:border-color .2s;min-height:90px}}
-textarea:focus{{border-color:var(--g)}}
-.btn{{background:var(--g);color:#000;border:none;padding:10px 22px;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer;margin-top:10px;transition:opacity .15s}}
-.btn:hover{{opacity:.85}} #result{{margin-top:10px;font-size:12px;color:var(--g);min-height:16px}}
+.act-btn{{background:rgba(37,211,102,.1);color:var(--g);border:1px solid rgba(37,211,102,.3);padding:4px 10px;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;transition:all .15s}}
+.act-btn:hover{{background:rgba(37,211,102,.2)}}
+.del-btn{{background:rgba(239,68,68,.1);color:var(--red);border:1px solid rgba(239,68,68,.3);padding:4px 10px;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;transition:all .15s}}
+.del-btn:hover{{background:rgba(239,68,68,.2)}}
+/* FORM */
+.form-grid{{display:grid;grid-template-columns:1fr 1fr;gap:14px;padding:20px}}
+@media(max-width:600px){{.form-grid{{grid-template-columns:1fr}}}}
+.form-group{{display:flex;flex-direction:column;gap:6px}}
+.form-group.full{{grid-column:1/-1}}
+label{{font-size:11px;font-weight:600;color:var(--m);text-transform:uppercase;letter-spacing:.7px}}
+input,textarea,select{{background:#0b0b15;border:1px solid var(--b);border-radius:8px;color:var(--text);padding:10px 12px;font-family:inherit;font-size:13px;outline:none;transition:border-color .2s;width:100%}}
+input:focus,textarea:focus{{border-color:var(--g)}}
+textarea{{resize:vertical;min-height:70px}}
+.btn{{background:var(--g);color:#000;border:none;padding:10px 22px;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer;transition:opacity .15s}}
+.btn:hover{{opacity:.85}}
+.btn-outline{{background:none;border:1px solid var(--b);color:var(--m);padding:10px 22px;border-radius:8px;font-weight:600;font-size:13px;cursor:pointer;transition:all .15s}}
+.btn-outline:hover{{border-color:var(--g);color:var(--g)}}
+.form-footer{{padding:0 20px 20px;display:flex;gap:10px}}
+/* PRODUCT CARDS */
+.prod-grid{{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px;padding:18px}}
+.prod-card{{background:#0d0d18;border:1px solid var(--b);border-radius:12px;overflow:hidden}}
+.prod-img{{width:100%;height:140px;object-fit:cover;background:#1a1a2a;display:block}}
+.prod-img-placeholder{{width:100%;height:140px;background:#1a1a2a;display:flex;align-items:center;justify-content:center;font-size:32px;font-weight:700;color:#2a2a3a}}
+.prod-info{{padding:12px}}
+.prod-name{{font-size:13px;font-weight:700;margin-bottom:4px}}
+.prod-price{{font-size:15px;font-weight:700;color:var(--g);margin-bottom:4px}}
+.prod-stock{{font-size:11px;color:var(--m);margin-bottom:10px}}
+.prod-actions{{display:flex;gap:8px}}
+/* STATUS */
+.status-ok{{color:#22c55e}} .status-low{{color:#f59e0b}} .status-out{{color:var(--red)}}
+/* BROADCAST */
+.bcast{{padding:18px}}
+.bcast p{{font-size:13px;color:var(--m);margin-bottom:14px}}
+/* MODAL */
+.modal-bg{{position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:200;display:none;align-items:center;justify-content:center}}
+.modal-bg.on{{display:flex}}
+.modal{{background:var(--s);border:1px solid var(--b);border-radius:16px;width:100%;max-width:520px;max-height:90vh;overflow-y:auto;margin:20px}}
+.modal-head{{padding:16px 20px;border-bottom:1px solid var(--b);display:flex;align-items:center;justify-content:space-between}}
+.modal-head h3{{font-size:15px;font-weight:700}}
+.modal-close{{background:none;border:none;color:var(--m);font-size:22px;cursor:pointer;line-height:1}}
+#toast2{{position:fixed;top:20px;right:20px;background:#0d2211;border:1px solid var(--g);color:var(--g);font-size:13px;font-weight:600;padding:10px 18px;border-radius:10px;opacity:0;pointer-events:none;z-index:9999;transition:all .25s}}
+#toast2.on{{opacity:1}}
 </style></head><body>
+
 <header>
-  <h1>⚡ CodedLabs Admin</h1>
-  <span class="tag">{ai_label}</span>
+  <h1>⚡ CodedLabs Commerce OS</h1>
+  <span class="tag">CodedLabs AI</span>
 </header>
-<div class="wrap">
+
+<div class="tabs">
+  <button class="tab on" onclick="switchTab('orders')">📦 Orders</button>
+  <button class="tab" onclick="switchTab('products')">🗃️ Products</button>
+  <button class="tab" onclick="switchTab('broadcast')">📣 Broadcast</button>
+</div>
+
+<div id="toast2"></div>
+
+<!-- ── ORDERS TAB ── -->
+<div class="panel on" id="tab-orders">
   <div class="stats">
-    <div class="stat"><div class="stat-n" style="color:var(--g)">{total_orders}</div><div class="stat-l">Orders</div></div>
+    <div class="stat"><div class="stat-n" style="color:var(--g)">{total_orders}</div><div class="stat-l">Total Orders</div></div>
     <div class="stat"><div class="stat-n" style="color:#f59e0b">{pending}</div><div class="stat-l">Pending</div></div>
     <div class="stat"><div class="stat-n" style="color:#22c55e">{delivered}</div><div class="stat-l">Delivered</div></div>
     <div class="stat"><div class="stat-n" style="color:#3b82f6">{total_customers}</div><div class="stat-l">Customers</div></div>
     <div class="stat"><div class="stat-n" style="color:#a78bfa">{tokens_today:,}</div><div class="stat-l">Tokens Today</div></div>
   </div>
-  {low_banner}
   <div class="card">
-    <div class="card-head">📦 Orders (last 100)</div>
+    <div class="card-head">Orders (last 100)</div>
     <div class="tbl-wrap"><table>
-      <thead><tr><th>Order ID</th><th>Phone</th><th>Items</th><th>Status</th><th>Date</th></tr></thead>
-      <tbody>{sales_rows}</tbody>
+      <thead><tr><th>Order ID</th><th>Phone</th><th>Items</th><th>Amount</th><th>Status</th><th>Date</th><th>Action</th></tr></thead>
+      <tbody id="orders-body">{sales_rows}</tbody>
     </table></div>
   </div>
+</div>
+
+<!-- ── PRODUCTS TAB ── -->
+<div class="panel" id="tab-products">
   <div class="card">
-    <div class="card-head">🗃️ Inventory</div>
-    <table><thead><tr><th>Product</th><th>Price</th><th>Description</th><th>Stock</th></tr></thead>
-    <tbody>{inv_rows}</tbody></table>
-  </div>
-  <div class="card">
-    <div class="card-head">📣 Broadcast (max {BROADCAST_HOURLY}/hour)</div>
-    <div class="bcast">
-      <p>Send to all {total_customers} customers. Max 100 per hour.</p>
-      <textarea id="msg" placeholder="Flash sale today! Shop now..."></textarea>
-      <br><button class="btn" onclick="send()">Send to All Customers</button>
-      <div id="result"></div>
+    <div class="card-head">
+      <span>Product Inventory</span>
+      <button class="btn" onclick="openAddModal()">+ Add Product</button>
+    </div>
+    <div class="prod-grid" id="prod-grid">
+      <p style="color:var(--m);font-size:13px;padding:10px">Loading products...</p>
     </div>
   </div>
 </div>
+
+<!-- ── BROADCAST TAB ── -->
+<div class="panel" id="tab-broadcast">
+  <div class="card">
+    <div class="card-head">📣 Broadcast Message</div>
+    <div class="bcast">
+      <p>Send a message to all {total_customers} customers. Max 100 per hour to avoid WhatsApp bans.</p>
+      <textarea id="msg" placeholder="Flash sale today! 🔥 Shop now: {CATALOG_URL}"></textarea>
+      <br><br>
+      <button class="btn" onclick="sendBroadcast()">Send to All Customers</button>
+      <div id="result" style="margin-top:12px;font-size:13px;color:var(--g)"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ── ADD PRODUCT MODAL ── -->
+<div class="modal-bg" id="add-modal">
+  <div class="modal">
+    <div class="modal-head">
+      <h3 id="modal-title">Add Product</h3>
+      <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+    <div class="form-grid">
+      <input type="hidden" id="edit-id">
+      <div class="form-group full">
+        <label>Product Name</label>
+        <input type="text" id="f-name" placeholder="e.g. iPhone 13 Pro">
+      </div>
+      <div class="form-group full">
+        <label>Description</label>
+        <textarea id="f-desc" placeholder="Brief product description..."></textarea>
+      </div>
+      <div class="form-group">
+        <label>Price (NGN)</label>
+        <input type="number" id="f-price" placeholder="450000">
+      </div>
+      <div class="form-group">
+        <label>Stock</label>
+        <input type="number" id="f-stock" placeholder="10">
+      </div>
+      <div class="form-group full">
+        <label>Image URL (direct link)</label>
+        <input type="text" id="f-img" placeholder="https://...">
+      </div>
+      <div class="form-group full">
+        <label>Tags (comma separated)</label>
+        <input type="text" id="f-tags" placeholder="electronics, phones, accessories">
+      </div>
+    </div>
+    <div class="form-footer">
+      <button class="btn" onclick="saveProduct()">Save Product</button>
+      <button class="btn-outline" onclick="closeModal()">Cancel</button>
+    </div>
+  </div>
+</div>
+
 <script>
-async function send(){{
-  const msg=document.getElementById('msg').value.trim();
-  const r=document.getElementById('result');
+var SECRET = '{ADMIN_SECRET}';
+
+// ── TABS ──
+function switchTab(name){{
+  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('on'));
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('on'));
+  document.getElementById('tab-'+name).classList.add('on');
+  event.target.classList.add('on');
+  if(name==='products') loadProducts();
+}}
+
+// ── TOAST ──
+function toast(msg,err){{
+  var el=document.getElementById('toast2');
+  el.textContent=msg;
+  el.style.borderColor=err?'#ef4444':'#25D366';
+  el.style.color=err?'#ef4444':'#25D366';
+  el.classList.add('on');
+  setTimeout(()=>el.classList.remove('on'),2500);
+}}
+
+// ── PRODUCTS ──
+var allProducts=[];
+
+async function loadProducts(){{
+  try{{
+    const res=await fetch('/admin/products?secret='+SECRET);
+    allProducts=await res.json();
+    renderProducts(allProducts);
+  }}catch(e){{toast('Failed to load products',true);}}
+}}
+
+function renderProducts(products){{
+  var grid=document.getElementById('prod-grid');
+  if(!products.length){{grid.innerHTML='<p style="color:var(--m);font-size:13px;padding:10px">No products yet. Click Add Product to get started.</p>';return;}}
+  grid.innerHTML=products.map(p=>{{
+    var stockColor=p.stock==0?'status-out':p.stock<=3?'status-low':'status-ok';
+    var stockLabel=p.stock==0?'Out of Stock':p.stock<=3?'Low Stock ('+p.stock+')':p.stock+' in stock';
+    var img=p.image_url?'<img class="prod-img" src="'+p.image_url+'" onerror="this.style.display=\'none\'">':'<div class="prod-img-placeholder">'+p.name.substring(0,2).toUpperCase()+'</div>';
+    return '<div class="prod-card">'+img+'<div class="prod-info"><div class="prod-name">'+p.name+'</div><div class="prod-price">NGN '+parseInt(p.price).toLocaleString()+'</div><div class="prod-stock '+stockColor+'">'+stockLabel+'</div><div class="prod-actions"><button class="act-btn" onclick=\'editProduct('+JSON.stringify(p)+')\'>Edit</button><button class="del-btn" onclick="deleteProduct(\''+p.id+'\')">Delete</button></div></div></div>';
+  }}).join('');
+}}
+
+function openAddModal(){{
+  document.getElementById('modal-title').textContent='Add Product';
+  document.getElementById('edit-id').value='';
+  document.getElementById('f-name').value='';
+  document.getElementById('f-desc').value='';
+  document.getElementById('f-price').value='';
+  document.getElementById('f-stock').value='';
+  document.getElementById('f-img').value='';
+  document.getElementById('f-tags').value='';
+  document.getElementById('add-modal').classList.add('on');
+}}
+
+function editProduct(p){{
+  document.getElementById('modal-title').textContent='Edit Product';
+  document.getElementById('edit-id').value=p.id;
+  document.getElementById('f-name').value=p.name||'';
+  document.getElementById('f-desc').value=p.description||'';
+  document.getElementById('f-price').value=p.price||'';
+  document.getElementById('f-stock').value=p.stock||'';
+  document.getElementById('f-img').value=p.image_url||'';
+  document.getElementById('f-tags').value=p.tags||'';
+  document.getElementById('add-modal').classList.add('on');
+}}
+
+function closeModal(){{document.getElementById('add-modal').classList.remove('on');}}
+
+async function saveProduct(){{
+  var id=document.getElementById('edit-id').value;
+  var data={{
+    name:document.getElementById('f-name').value.trim(),
+    description:document.getElementById('f-desc').value.trim(),
+    price:parseInt(document.getElementById('f-price').value)||0,
+    stock:parseInt(document.getElementById('f-stock').value)||0,
+    image_url:document.getElementById('f-img').value.trim(),
+    tags:document.getElementById('f-tags').value.trim(),
+  }};
+  if(!data.name){{toast('Product name is required',true);return;}}
+  try{{
+    var url=id?'/admin/products/'+id+'?secret='+SECRET:'/admin/products?secret='+SECRET;
+    var method=id?'PUT':'POST';
+    const res=await fetch(url,{{method,headers:{{'Content-Type':'application/json'}},body:JSON.stringify(data)}});
+    const result=await res.json();
+    if(result.error){{toast(result.error,true);return;}}
+    toast(id?'Product updated!':'Product added!');
+    closeModal();
+    loadProducts();
+  }}catch(e){{toast('Save failed',true);}}
+}}
+
+async function deleteProduct(id){{
+  if(!confirm('Delete this product? This cannot be undone.'))return;
+  try{{
+    await fetch('/admin/products/'+id+'?secret='+SECRET,{{method:'DELETE'}});
+    toast('Product deleted');
+    loadProducts();
+  }}catch(e){{toast('Delete failed',true);}}
+}}
+
+// ── ORDERS ──
+async function markStatus(id,status){{
+  try{{
+    await fetch('/admin/orders/'+id+'?secret='+SECRET,{{
+      method:'PUT',
+      headers:{{'Content-Type':'application/json'}},
+      body:JSON.stringify({{status}})
+    }});
+    toast('Order marked as '+status);
+    setTimeout(()=>location.reload(),1000);
+  }}catch(e){{toast('Update failed',true);}}
+}}
+
+// ── BROADCAST ──
+async function sendBroadcast(){{
+  var msg=document.getElementById('msg').value.trim();
+  var r=document.getElementById('result');
   if(!msg){{r.textContent='Write a message first.';return;}}
   r.textContent='Sending...';
   try{{
-    const res=await fetch('/broadcast',{{method:'POST',
-      headers:{{'Content-Type':'application/json'}},
-      body:JSON.stringify({{secret:'{ADMIN_SECRET}',message:msg}})}});
+    const res=await fetch('/broadcast',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{secret:SECRET,message:msg}})}});
     const d=await res.json();
     r.textContent='Sent to '+d.sent+' customers. ('+d.failed+' failed)';
-  }}catch(e){{r.textContent='Broadcast failed. Check logs.';}}
+  }}catch(e){{r.textContent='Broadcast failed.';}}
 }}
 </script>
 </body></html>"""
 
 
 # ══════════════════════════════════════════════════════
-# 16. UTILITY ENDPOINTS
+# 16. PRODUCT MANAGEMENT API
+# ══════════════════════════════════════════════════════
+@app.route("/admin/orders/<order_id>", methods=["PUT"])
+def api_update_order(order_id):
+    if request.args.get("secret") != ADMIN_SECRET:
+        return jsonify({"error": "Unauthorized"}), 403
+    body = request.json or {}
+    try:
+        supabase.table("orders").update({"status": body.get("status","Pending")}).eq("id", order_id).execute()
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/admin/products", methods=["GET"])
+def api_get_products():
+    if request.args.get("secret") != ADMIN_SECRET:
+        return jsonify({"error": "Unauthorized"}), 403
+    try:
+        query = supabase.table("products").select("*")
+        if CLIENT_ID:
+            query = query.eq("client_id", CLIENT_ID)
+        result = query.order("created_at", desc=False).execute()
+        return jsonify(result.data)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/admin/products", methods=["POST"])
+def api_add_product():
+    if request.args.get("secret") != ADMIN_SECRET:
+        return jsonify({"error": "Unauthorized"}), 403
+    body = request.json or {}
+    try:
+        data = {
+            "name":        body.get("name", "").strip(),
+            "description": body.get("description", "").strip(),
+            "price":       int(body.get("price", 0)),
+            "stock":       int(body.get("stock", 0)),
+            "image_url":   body.get("image_url", "").strip(),
+            "tags":        body.get("tags", "").strip(),
+            "active":      True,
+            "created_at":  time.strftime("%Y-%m-%dT%H:%M:%S"),
+        }
+        if CLIENT_ID:
+            data["client_id"] = CLIENT_ID
+        result = supabase.table("products").insert(data).execute()
+        # Bust inventory cache
+        inventory_cache["data"]         = None
+        inventory_cache["last_updated"] = 0
+        return jsonify(result.data[0])
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/admin/products/<product_id>", methods=["PUT"])
+def api_update_product(product_id):
+    if request.args.get("secret") != ADMIN_SECRET:
+        return jsonify({"error": "Unauthorized"}), 403
+    body = request.json or {}
+    try:
+        data = {}
+        if "name"        in body: data["name"]        = body["name"].strip()
+        if "description" in body: data["description"] = body["description"].strip()
+        if "price"       in body: data["price"]        = int(body["price"])
+        if "stock"       in body: data["stock"]        = int(body["stock"])
+        if "image_url"   in body: data["image_url"]   = body["image_url"].strip()
+        if "tags"        in body: data["tags"]         = body["tags"].strip()
+        if "active"      in body: data["active"]       = bool(body["active"])
+        supabase.table("products").update(data).eq("id", product_id).execute()
+        inventory_cache["data"]         = None
+        inventory_cache["last_updated"] = 0
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/admin/products/<product_id>", methods=["DELETE"])
+def api_delete_product(product_id):
+    if request.args.get("secret") != ADMIN_SECRET:
+        return jsonify({"error": "Unauthorized"}), 403
+    try:
+        supabase.table("products").delete().eq("id", product_id).execute()
+        inventory_cache["data"]         = None
+        inventory_cache["last_updated"] = 0
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ══════════════════════════════════════════════════════
+# 17. UTILITY ENDPOINTS
 # ══════════════════════════════════════════════════════
 @app.route("/refresh")
 def refresh():
